@@ -33,8 +33,6 @@ interface Order {
   customers: Customer | null;
 }
 
-type ConnectionStatus = "connecting" | "connected" | "error";
-
 const isConfirmedOrApprovedStatus = (status: string | null | undefined) =>
   Boolean(status?.startsWith("confirmed") || status === "approved");
 
@@ -113,7 +111,6 @@ export default function OrderFeed() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [realtimeStatus, setRealtimeStatus] = useState<ConnectionStatus>("connecting");
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "confirmed" | "flagged">("all");
   const [dashboardView, setDashboardView] = useState<"feed" | "insights" | "tracking">("feed");
@@ -134,7 +131,6 @@ export default function OrderFeed() {
   const [loadingTrackingOrders, setLoadingTrackingOrders] = useState(false);
   const [globalStats, setGlobalStats] = useState({ totalProcessed: 0, totalFlagged: 0, uniqueCustomers: 0 });
   const [loadingGlobalStats, setLoadingGlobalStats] = useState(true);
-  const [globalDataVersion, setGlobalDataVersion] = useState(0);
 
   // All orders for PatternStrip lookups (keyed by customer_id)
   const [allOrdersByCustomer, setAllOrdersByCustomer] = useState<Map<number, Order[]>>(new Map());
@@ -170,9 +166,9 @@ export default function OrderFeed() {
   useEffect(() => {
     let active = true;
 
-    async function fetchOrders() {
+    async function fetchOrders(showLoading = true) {
       try {
-        setLoading(true);
+        if (showLoading) setLoading(true);
         const { data, error } = await supabase
           .from("orders")
           .select(`
@@ -203,15 +199,19 @@ export default function OrderFeed() {
         }
       } finally {
         if (active) {
-          setLoading(false);
+          if (showLoading) setLoading(false);
         }
       }
     }
 
     fetchOrders();
+    const intervalId = window.setInterval(() => {
+      fetchOrders(false);
+    }, 3000);
 
     return () => {
       active = false;
+      window.clearInterval(intervalId);
     };
   }, []);
 
@@ -223,9 +223,9 @@ export default function OrderFeed() {
     }
 
     let active = true;
-    async function fetchHistory() {
+    async function fetchHistory(showLoading = true) {
       try {
-        setLoadingHistory(true);
+        if (showLoading) setLoadingHistory(true);
         const { data, error } = await supabase
           .from("orders")
           .select(`
@@ -251,14 +251,19 @@ export default function OrderFeed() {
         console.error("Error fetching customer history:", err);
       } finally {
         if (active) {
-          setLoadingHistory(false);
+          if (showLoading) setLoadingHistory(false);
         }
       }
     }
 
     fetchHistory();
+    const intervalId = window.setInterval(() => {
+      fetchHistory(false);
+    }, 3000);
+
     return () => {
       active = false;
+      window.clearInterval(intervalId);
     };
   }, [selectedCustomerId]);
 
@@ -269,9 +274,9 @@ export default function OrderFeed() {
     }
 
     let active = true;
-    async function fetchTrackingOrders() {
+    async function fetchTrackingOrders(showLoading = true) {
       try {
-        setLoadingTrackingOrders(true);
+        if (showLoading) setLoadingTrackingOrders(true);
         const { data, error } = await supabase
           .from("orders")
           .select(`
@@ -298,14 +303,19 @@ export default function OrderFeed() {
         console.error("Error fetching tracking orders:", err);
       } finally {
         if (active) {
-          setLoadingTrackingOrders(false);
+          if (showLoading) setLoadingTrackingOrders(false);
         }
       }
     }
 
     fetchTrackingOrders();
+    const intervalId = window.setInterval(() => {
+      fetchTrackingOrders(false);
+    }, 3000);
+
     return () => {
       active = false;
+      window.clearInterval(intervalId);
     };
   }, [dashboardView, selectedCustomerId]);
 
@@ -407,124 +417,7 @@ export default function OrderFeed() {
     }
 
     fetchGlobalData();
-  }, [orders, globalDataVersion]);
-
-  // Subscribe to realtime updates on orders table
-  useEffect(() => {
-    const channel = supabase
-      .channel("public-orders-changes-v2")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "orders",
-        },
-        async (payload) => {
-          setGlobalDataVersion((version) => version + 1);
-
-          if (payload.eventType === "INSERT") {
-            const newOrder = payload.new as any;
-
-            // Fetch customer name for the new order
-            const { data: customerData, error: custErr } = await supabase
-              .from("customers")
-              .select("name")
-              .eq("id", newOrder.customer_id)
-              .single();
-
-            const completeOrder: Order = {
-              ...newOrder,
-              customers: !custErr && customerData ? { name: customerData.name } : { name: "Unknown Customer" },
-            };
-
-            // Trigger animation
-            setNewOrderIds((prev) => {
-              const next = new Set(prev);
-              next.add(completeOrder.id);
-              return next;
-            });
-
-            setOrders((prev) => [completeOrder, ...prev].slice(0, 50));
-
-            // Update history if active customer is matched
-            if (selectedCustomerIdRef.current === newOrder.customer_id) {
-              setCustomerHistory((prev) => [...prev, completeOrder]);
-            }
-
-            if (
-              selectedCustomerIdRef.current === newOrder.customer_id &&
-              isConfirmedOrApprovedStatus(newOrder.status)
-            ) {
-              setTrackingOrders((prev) => [completeOrder, ...prev]);
-            }
-          } else if (payload.eventType === "UPDATE") {
-            const updatedOrder = payload.new as any;
-
-            setOrders((prev) => {
-              const idx = prev.findIndex((o) => o.id === updatedOrder.id);
-              if (idx !== -1) {
-                const next = [...prev];
-                next[idx] = {
-                  ...next[idx],
-                  ...updatedOrder,
-                };
-                return next;
-              }
-              return prev;
-            });
-
-            // Update history if active customer is matched
-            if (selectedCustomerIdRef.current === updatedOrder.customer_id) {
-              setCustomerHistory((prev) =>
-                prev.map((o) => (o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o))
-              );
-            }
-
-            setTrackingOrders((prev) => {
-              const belongsToSelectedCustomer = selectedCustomerIdRef.current === updatedOrder.customer_id;
-              const shouldTrack = belongsToSelectedCustomer && isConfirmedOrApprovedStatus(updatedOrder.status);
-              const existingIndex = prev.findIndex((o) => o.id === updatedOrder.id);
-
-              if (!shouldTrack) {
-                return existingIndex === -1 ? prev : prev.filter((o) => o.id !== updatedOrder.id);
-              }
-
-              if (existingIndex !== -1) {
-                const next = [...prev];
-                next[existingIndex] = { ...next[existingIndex], ...updatedOrder };
-                return next;
-              }
-
-              return [{ ...updatedOrder, customers: null } as Order, ...prev].sort(
-                (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-              );
-            });
-          } else if (payload.eventType === "DELETE") {
-            const deletedOrder = payload.old as any;
-            setOrders((prev) => prev.filter((o) => o.id !== deletedOrder.id));
-
-            // Update history if active customer is matched
-            setCustomerHistory((prev) => prev.filter((o) => o.id !== deletedOrder.id));
-            setTrackingOrders((prev) => prev.filter((o) => o.id !== deletedOrder.id));
-          }
-        }
-      );
-
-    channel.subscribe((status) => {
-      if (status === "SUBSCRIBED") {
-        setRealtimeStatus("connected");
-      } else if (status === "CLOSED" || status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-        setRealtimeStatus("error");
-      } else {
-        setRealtimeStatus("connecting");
-      }
-    });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, []);
+  }, [orders]);
 
   // Update order status with optimistic UI updates
   const handleUpdateStatus = useCallback(async (orderId: number, newStatus: "approved" | "rejected") => {
@@ -1391,45 +1284,27 @@ export default function OrderFeed() {
                       alignItems: "center",
                       gap: 6,
                       padding: "3px 10px",
-                      border: `1px solid ${
-                        realtimeStatus === "connected"
-                          ? "var(--ledger-teal)"
-                          : realtimeStatus === "connecting"
-                          ? "var(--brass)"
-                          : "var(--rust)"
-                      }`,
+                      border: "1px solid var(--ledger-teal)",
                       borderRadius: 2,
                       fontSize: 10,
                       fontWeight: 600,
                       letterSpacing: "0.15em",
                       textTransform: "uppercase" as const,
-                      color:
-                        realtimeStatus === "connected"
-                          ? "var(--ledger-teal)"
-                          : realtimeStatus === "connecting"
-                          ? "var(--brass)"
-                          : "var(--rust)",
+                      color: "var(--ledger-teal)",
                       fontFamily: "Inter, sans-serif",
                       background: "var(--ink)",
                     }}
                   >
                     <span
-                      className={realtimeStatus === "connected" ? "live-pulse" : ""}
+                      className="live-pulse"
                       style={{
                         width: 5,
                         height: 5,
                         borderRadius: "50%",
-                        background:
-                          realtimeStatus === "connected"
-                            ? "var(--ledger-teal)"
-                            : realtimeStatus === "connecting"
-                            ? "var(--brass)"
-                            : "var(--rust)",
+                        background: "var(--ledger-teal)",
                       }}
                     />
-                    {realtimeStatus === "connected" && "LIVE"}
-                    {realtimeStatus === "connecting" && "CONNECTING"}
-                    {realtimeStatus === "error" && "OFFLINE"}
+                    LIVE
                   </span>
 
                   <div className="dashboard-view-toggle" aria-label="Dashboard view">
