@@ -1,0 +1,612 @@
+@import "tailwindcss";
+
+/* ── Design Tokens ── */
+:root {
+  --ink: #121915;
+  --ledger-panel: #1C2620;
+  --parchment: #EDE6D6;
+  --rust: #C1553B;
+  --ledger-teal: #4E8C7C;
+  --brass: #B98B4E;
+
+  /* Derived */
+  --rule: #2A3830;
+  --muted: rgba(237, 230, 214, 0.4);
+  --muted-strong: rgba(237, 230, 214, 0.55);
+}
+
+/* ── Base ── */
+html {
+  background: var(--ink);
+  color: var(--parchment);
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* HUD Faint Dot Pattern */
+  background-image: radial-gradient(rgba(237, 230, 214, 0.03) 1px, transparent 1px);
+  background-size: 16px 16px;
+  background-position: 0 0;
+  background-attachment: fixed;
+}
+
+/* ── Font utilities ── */
+.font-display {
+  font-family: 'Fraunces', serif;
+}
+
+.font-mono-num {
+  font-family: 'IBM Plex Mono', monospace;
+}
+
+/* ── Selection ── */
+::selection {
+  background: rgba(185, 139, 78, 0.25);
+  color: var(--parchment);
+}
+
+/* ── Focus rings ── */
+*:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--ink);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--rule);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brass);
+}
+
+/* ── Small caps label ── */
+.label-caps {
+  font-family: 'Inter', sans-serif;
+  font-variant: all-small-caps;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ── Viewfinder Card Frame ── */
+.viewfinder-card {
+  position: relative;
+  background: var(--ledger-panel);
+  padding: 20px;
+  /* Remove normal borders */
+  border: none;
+  border-radius: 0;
+}
+
+.viewfinder-card::before,
+.viewfinder-card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+/* Top-Left and Bottom-Right corners */
+.viewfinder-card::before {
+  background:
+    /* Top Left */
+    linear-gradient(to right, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 0 0,
+    linear-gradient(to bottom, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 0 0,
+    /* Bottom Right */
+    linear-gradient(to left, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 100% 100%,
+    linear-gradient(to top, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 100% 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+/* Top-Right and Bottom-Left corners */
+.viewfinder-card::after {
+  background:
+    /* Top Right */
+    linear-gradient(to left, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 100% 0,
+    linear-gradient(to bottom, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 100% 0,
+    /* Bottom Left */
+    linear-gradient(to right, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 0 100%,
+    linear-gradient(to top, rgba(237, 230, 214, 0.3) 16px, transparent 16px) 0 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+
+/* ── Animations ── */
+
+.sidebar-customer-button {
+  position: relative;
+  width: 100%;
+  margin-bottom: 3px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--parchment);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  text-align: left;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.sidebar-customer-button::before,
+.sidebar-customer-button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.sidebar-customer-button--active {
+  background: rgba(185, 139, 78, 0.06);
+  color: var(--brass);
+  font-weight: 600;
+}
+
+.sidebar-customer-button--active::before {
+  opacity: 1;
+  background:
+    linear-gradient(to right, var(--brass) 12px, transparent 12px) 0 0,
+    linear-gradient(to bottom, var(--brass) 12px, transparent 12px) 0 0,
+    linear-gradient(to left, var(--brass) 12px, transparent 12px) 100% 100%,
+    linear-gradient(to top, var(--brass) 12px, transparent 12px) 100% 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+.sidebar-customer-button--active::after {
+  opacity: 1;
+  background:
+    linear-gradient(to left, var(--brass) 12px, transparent 12px) 100% 0,
+    linear-gradient(to bottom, var(--brass) 12px, transparent 12px) 100% 0,
+    linear-gradient(to right, var(--brass) 12px, transparent 12px) 0 100%,
+    linear-gradient(to top, var(--brass) 12px, transparent 12px) 0 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+.sidebar-customer-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-customer-name-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.sidebar-customer-active-glyph {
+  color: var(--brass);
+  flex: 0 0 auto;
+}
+
+.sidebar-customer-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+}
+
+.sidebar-customer-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-customer-time {
+  color: var(--parchment);
+  font-size: 10px;
+  line-height: 1;
+  opacity: 0.5;
+}
+
+.distribution-customer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--rule);
+  color: var(--parchment);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+}
+
+.distribution-customer-row:last-child {
+  border-bottom: 0;
+}
+
+.distribution-rank-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+}
+
+.tracking-list {
+  max-width: 880px;
+}
+
+.tracking-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.tracking-row:last-child {
+  border-bottom: 0;
+}
+
+.tracking-row__meta {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.tracking-row__status {
+  margin: 5px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.order-feed-scroll {
+  max-height: calc((360px * 2) + 16px);
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(237, 230, 214, 0.25) var(--ink);
+}
+
+.order-feed-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.order-feed-scroll::-webkit-scrollbar-track {
+  background: var(--ink);
+  border-radius: 3px;
+}
+
+.order-feed-scroll::-webkit-scrollbar-thumb {
+  background: rgba(237, 230, 214, 0.25);
+  border-radius: 3px;
+}
+
+.order-feed-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(237, 230, 214, 0.4);
+}
+
+.dashboard-view-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dashboard-view-toggle__button {
+  position: relative;
+  padding: 7px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: rgba(237, 230, 214, 0.6);
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.dashboard-view-toggle__button::before,
+.dashboard-view-toggle__button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dashboard-view-toggle__button::before {
+  background:
+    linear-gradient(to right, var(--brass) 10px, transparent 10px) 0 0,
+    linear-gradient(to bottom, var(--brass) 10px, transparent 10px) 0 0,
+    linear-gradient(to left, var(--brass) 10px, transparent 10px) 100% 100%,
+    linear-gradient(to top, var(--brass) 10px, transparent 10px) 100% 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+.dashboard-view-toggle__button::after {
+  background:
+    linear-gradient(to left, var(--brass) 10px, transparent 10px) 100% 0,
+    linear-gradient(to bottom, var(--brass) 10px, transparent 10px) 100% 0,
+    linear-gradient(to right, var(--brass) 10px, transparent 10px) 0 100%,
+    linear-gradient(to top, var(--brass) 10px, transparent 10px) 0 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+.dashboard-view-toggle__button--active {
+  background: var(--brass);
+  color: var(--ink);
+}
+
+.floating-place-order {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  left: auto;
+  z-index: 999;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 28px;
+  background: var(--rust);
+  border: 1px solid var(--rust);
+  border-radius: 0;
+  color: var(--parchment);
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+  overflow: hidden;
+  box-shadow: 0 12px 32px rgba(193, 85, 59, 0.35);
+  transition:
+    background-color 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.floating-place-order::before,
+.floating-place-order::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.floating-place-order::before {
+  background:
+    linear-gradient(to right, var(--parchment) 16px, transparent 16px) 0 0,
+    linear-gradient(to bottom, var(--parchment) 16px, transparent 16px) 0 0,
+    linear-gradient(to left, var(--parchment) 16px, transparent 16px) 100% 100%,
+    linear-gradient(to top, var(--parchment) 16px, transparent 16px) 100% 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+.floating-place-order::after {
+  background:
+    linear-gradient(to left, var(--parchment) 16px, transparent 16px) 100% 0,
+    linear-gradient(to bottom, var(--parchment) 16px, transparent 16px) 100% 0,
+    linear-gradient(to right, var(--parchment) 16px, transparent 16px) 0 100%,
+    linear-gradient(to top, var(--parchment) 16px, transparent 16px) 0 100%;
+  background-size: 100% 1.5px, 1.5px 100%, 100% 1.5px, 1.5px 100%;
+  background-repeat: no-repeat;
+}
+
+.floating-place-order:hover {
+  background: var(--rust);
+  border-color: var(--rust);
+  box-shadow: 0 14px 38px rgba(193, 85, 59, 0.48);
+}
+
+.floating-place-order > span {
+  position: relative;
+  z-index: 1;
+}
+
+.floating-place-order__dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--parchment);
+}
+
+.order-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1001;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 24px;
+  background: rgba(18, 25, 21, 0.42);
+}
+
+.order-modal {
+  width: min(360px, calc(100vw - 48px));
+  padding: 24px;
+  background: var(--ledger-panel);
+}
+
+.order-modal__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.order-modal__close:hover {
+  color: var(--parchment);
+}
+
+.order-modal__title {
+  margin: 0 28px 12px 0;
+  color: var(--parchment);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.order-modal__copy {
+  margin: 0 0 10px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.order-modal__code {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  background: var(--ink);
+  color: var(--brass);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.order-modal__primary {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1px solid var(--rust);
+  background: var(--rust);
+  color: var(--parchment);
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.order-modal__link {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.order-modal__link:hover {
+  color: var(--parchment);
+}
+
+@media (max-width: 768px) {
+  .floating-place-order {
+    right: 24px;
+    bottom: 24px;
+    padding: 14px 22px;
+    font-size: 12px;
+  }
+
+  .order-modal-overlay {
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+@keyframes dot-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(78, 140, 124, 0.7);
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.4;
+    box-shadow: 0 0 8px 2px rgba(78, 140, 124, 0);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(78, 140, 124, 0);
+  }
+}
+
+.live-pulse {
+  animation: dot-pulse 1.5s infinite ease-in-out;
+}
+
+@keyframes scanner-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-sweep {
+  position: relative;
+  overflow: hidden;
+}
+
+.animate-sweep::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    rgba(185, 139, 78, 0.05) 45%,
+    rgba(185, 139, 78, 0.4) 50%,
+    rgba(185, 139, 78, 0.05) 55%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: scanner-sweep 400ms ease-out forwards;
+  pointer-events: none;
+  z-index: 10;
+}
