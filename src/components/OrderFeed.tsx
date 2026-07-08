@@ -134,6 +134,7 @@ export default function OrderFeed() {
   const [loadingTrackingOrders, setLoadingTrackingOrders] = useState(false);
   const [globalStats, setGlobalStats] = useState({ totalProcessed: 0, totalFlagged: 0, uniqueCustomers: 0 });
   const [loadingGlobalStats, setLoadingGlobalStats] = useState(true);
+  const [globalDataVersion, setGlobalDataVersion] = useState(0);
 
   // All orders for PatternStrip lookups (keyed by customer_id)
   const [allOrdersByCustomer, setAllOrdersByCustomer] = useState<Map<number, Order[]>>(new Map());
@@ -406,7 +407,7 @@ export default function OrderFeed() {
     }
 
     fetchGlobalData();
-  }, [orders]);
+  }, [orders, globalDataVersion]);
 
   // Subscribe to realtime updates on orders table
   useEffect(() => {
@@ -420,6 +421,8 @@ export default function OrderFeed() {
           table: "orders",
         },
         async (payload) => {
+          setGlobalDataVersion((version) => version + 1);
+
           if (payload.eventType === "INSERT") {
             const newOrder = payload.new as any;
 
@@ -448,6 +451,13 @@ export default function OrderFeed() {
             if (selectedCustomerIdRef.current === newOrder.customer_id) {
               setCustomerHistory((prev) => [...prev, completeOrder]);
             }
+
+            if (
+              selectedCustomerIdRef.current === newOrder.customer_id &&
+              isConfirmedOrApprovedStatus(newOrder.status)
+            ) {
+              setTrackingOrders((prev) => [completeOrder, ...prev]);
+            }
           } else if (payload.eventType === "UPDATE") {
             const updatedOrder = payload.new as any;
 
@@ -470,12 +480,33 @@ export default function OrderFeed() {
                 prev.map((o) => (o.id === updatedOrder.id ? { ...o, ...updatedOrder } : o))
               );
             }
+
+            setTrackingOrders((prev) => {
+              const belongsToSelectedCustomer = selectedCustomerIdRef.current === updatedOrder.customer_id;
+              const shouldTrack = belongsToSelectedCustomer && isConfirmedOrApprovedStatus(updatedOrder.status);
+              const existingIndex = prev.findIndex((o) => o.id === updatedOrder.id);
+
+              if (!shouldTrack) {
+                return existingIndex === -1 ? prev : prev.filter((o) => o.id !== updatedOrder.id);
+              }
+
+              if (existingIndex !== -1) {
+                const next = [...prev];
+                next[existingIndex] = { ...next[existingIndex], ...updatedOrder };
+                return next;
+              }
+
+              return [{ ...updatedOrder, customers: null } as Order, ...prev].sort(
+                (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+              );
+            });
           } else if (payload.eventType === "DELETE") {
             const deletedOrder = payload.old as any;
             setOrders((prev) => prev.filter((o) => o.id !== deletedOrder.id));
 
             // Update history if active customer is matched
             setCustomerHistory((prev) => prev.filter((o) => o.id !== deletedOrder.id));
+            setTrackingOrders((prev) => prev.filter((o) => o.id !== deletedOrder.id));
           }
         }
       );
