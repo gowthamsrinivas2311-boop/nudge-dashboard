@@ -36,6 +36,28 @@ interface Order {
 const isConfirmedOrApprovedStatus = (status: string | null | undefined) =>
   Boolean(status?.startsWith("confirmed") || status === "approved");
 
+const areOrdersEqual = (current: Order[], next: Order[]) => {
+  if (current.length !== next.length) return false;
+
+  return current.every((order, index) => {
+    const nextOrder = next[index];
+
+    return (
+      order.id === nextOrder.id &&
+      order.customer_id === nextOrder.customer_id &&
+      order.raw_message === nextOrder.raw_message &&
+      order.item === nextOrder.item &&
+      order.quantity === nextOrder.quantity &&
+      order.flagged === nextOrder.flagged &&
+      order.flag_reason === nextOrder.flag_reason &&
+      order.status === nextOrder.status &&
+      order.created_at === nextOrder.created_at &&
+      order.estimated_delivery_date === nextOrder.estimated_delivery_date &&
+      (order.customers?.name || "") === (nextOrder.customers?.name || "")
+    );
+  });
+};
+
 interface CustomerSummary {
   id: number;
   name: string;
@@ -191,7 +213,10 @@ export default function OrderFeed() {
 
         if (error) throw error;
         if (active) {
-          setOrders(data as unknown as Order[] || []);
+          const nextOrders = (data as unknown as Order[]) || [];
+          setOrders((currentOrders) =>
+            areOrdersEqual(currentOrders, nextOrders) ? currentOrders : nextOrders
+          );
         }
       } catch (err: any) {
         if (active) {
@@ -245,7 +270,10 @@ export default function OrderFeed() {
 
         if (error) throw error;
         if (active) {
-          setCustomerHistory(data as unknown as Order[] || []);
+          const nextHistory = (data as unknown as Order[]) || [];
+          setCustomerHistory((currentHistory) =>
+            areOrdersEqual(currentHistory, nextHistory) ? currentHistory : nextHistory
+          );
         }
       } catch (err) {
         console.error("Error fetching customer history:", err);
@@ -297,7 +325,12 @@ export default function OrderFeed() {
 
         if (error) throw error;
         if (active) {
-          setTrackingOrders(data as unknown as Order[] || []);
+          const nextTrackingOrders = (data as unknown as Order[]) || [];
+          setTrackingOrders((currentTrackingOrders) =>
+            areOrdersEqual(currentTrackingOrders, nextTrackingOrders)
+              ? currentTrackingOrders
+              : nextTrackingOrders
+          );
         }
       } catch (err) {
         console.error("Error fetching tracking orders:", err);
