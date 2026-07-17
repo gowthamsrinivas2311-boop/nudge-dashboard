@@ -25,6 +25,14 @@ type ConversationState = {
   partial_data: OrderDraft;
 };
 
+type StockDeductionResult = {
+  ok: boolean;
+  found: boolean;
+  deducted: boolean;
+  available?: number;
+  itemName?: string;
+};
+
 const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -245,6 +253,39 @@ async function setCustomerAddress(customerId: number, address: string) {
   if (error) throw error;
 }
 
+async function checkAndDeductStock(item: string, quantity: number): Promise<StockDeductionResult> {
+  const { data, error } = await supabaseAdmin.rpc("check_and_deduct_inventory", {
+    p_item_name: item,
+    p_quantity: quantity,
+  });
+  if (error) throw error;
+
+  const result = data as {
+    found?: boolean;
+    deducted?: boolean;
+    available?: number | string;
+    itemName?: string;
+  };
+
+  if (!result.found) {
+    console.warn(`[whatsapp-webhook] No inventory item found for "${item}". Skipping stock deduction.`);
+    return { ok: true, found: false, deducted: false };
+  }
+
+  const available = Number(result.available ?? 0);
+  return {
+    ok: Boolean(result.deducted),
+    found: true,
+    deducted: Boolean(result.deducted),
+    available,
+    itemName: result.itemName,
+  };
+}
+
+function outOfStockMessage(item: string, available: number) {
+  return `Sorry, we only have ${available} units of ${item} available right now, so we can't confirm this order.`;
+}
+
 async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, rawMessage: string) {
   const customer = await getOrCreateCustomer(phone, draft.customerName, draft.address);
   if (!customer.address) await setCustomerAddress(customer.id, draft.address);
@@ -258,7 +299,7 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
   if (historyErr) throw historyErr;
 
   const baselineOrders = (history ?? []).filter(
-    (order: any) => order.status !== "flagged" && order.status !== "rejected" && order.flagged !== true
+    (order: any) => order.status !== "flagged" && !String(order.status ?? "").startsWith("rejected") && order.flagged !== true
   );
   const average =
     baselineOrders.length > 0
@@ -269,6 +310,8 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
     ? `Unusual quantity for ${draft.item}: ${draft.quantity} vs average ${average!.toFixed(1)}`
     : null;
   const estimatedDeliveryDate = estimateDeliveryDate(draft.item);
+  const stockResult = isFlagged ? null : await checkAndDeductStock(draft.item, draft.quantity);
+  const status = isFlagged ? "flagged" : stockResult?.ok ? "confirmed" : "rejected_out_of_stock";
 
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("orders")
@@ -279,7 +322,7 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
       quantity: draft.quantity,
       flagged: isFlagged,
       flag_reason: flagReason,
-      status: isFlagged ? "flagged" : "confirmed",
+      status,
       estimated_delivery_date: estimatedDeliveryDate,
     })
     .select("id")
@@ -292,6 +335,12 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
       `This order looks unusual compared with the customer's usual pattern and has been flagged for review. Reply APPROVE, REJECT, or WHY.`
     );
   } else {
+    if (!stockResult?.ok) {
+      await sendWhatsAppMessage(phone, outOfStockMessage(draft.item, stockResult?.available ?? 0));
+      console.log(`[whatsapp-webhook] Rejected orderId=${order.id} out_of_stock item=${draft.item}`);
+      return;
+    }
+
     await sendWhatsAppMessage(
       phone,
       `Order confirmed: ${draft.quantity} ${draft.item}. Estimated delivery: ${formatDate(estimatedDeliveryDate)}.`
@@ -332,6 +381,19 @@ async function handleStatusCommand(phone: string, message: string) {
 
   if (command === "WHY") {
     return order.flag_reason || "This order was flagged because it differs from the customer's usual order pattern.";
+  }
+
+  if (command === "APPROVE") {
+    const stockResult = await checkAndDeductStock(String(order.item), Number(order.quantity));
+    if (!stockResult.ok) {
+      const { error: updateErr } = await supabaseAdmin
+        .from("orders")
+        .update({ status: "rejected_out_of_stock" })
+        .eq("id", order.id);
+      if (updateErr) throw updateErr;
+
+      return outOfStockMessage(String(order.item), stockResult.available ?? 0);
+    }
   }
 
   const nextStatus = command === "APPROVE" ? "approved" : "rejected";

@@ -291,6 +291,122 @@ body {
   line-height: 1.4;
 }
 
+.inventory-console {
+  max-width: 1040px;
+}
+
+.inventory-console__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.inventory-console__summary {
+  margin: 5px 0 0;
+  color: var(--parchment);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.inventory-console__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.inventory-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ink);
+}
+
+.inventory-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+}
+
+.inventory-table th,
+.inventory-table td {
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--rule);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.inventory-table th {
+  color: var(--muted);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.inventory-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.inventory-table__row--low {
+  background: rgba(193, 85, 59, 0.08);
+}
+
+.inventory-table__row--low td:first-child {
+  box-shadow: inset 2px 0 0 var(--rust);
+}
+
+.inventory-item-name {
+  color: var(--parchment);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.inventory-category {
+  color: var(--muted-strong);
+  font-size: 12px;
+  text-transform: capitalize;
+}
+
+.inventory-stock-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--brass);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inventory-stock-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  padding: 2px 7px;
+  border-radius: 2px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.inventory-stock-badge--low {
+  border: 1px solid var(--rust);
+  color: var(--rust);
+  background: rgba(193, 85, 59, 0.1);
+}
+
+.inventory-stock-badge--ok {
+  border: 1px solid var(--ledger-teal);
+  color: var(--ledger-teal);
+  background: rgba(78, 140, 124, 0.1);
+}
+
 .order-feed-scroll {
   max-height: calc((360px * 2) + 16px);
   overflow-y: auto;

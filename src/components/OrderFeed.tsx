@@ -34,8 +34,27 @@ interface Order {
   customers: Customer | null;
 }
 
+interface InventoryItem {
+  item_name: string;
+  category: string | null;
+  current_stock: number;
+  price_per_unit: number | null;
+}
+
+type DashboardView = "feed" | "insights" | "tracking" | "inventory";
+
+const dashboardViews: DashboardView[] = ["feed", "insights", "tracking", "inventory"];
+const lowStockThreshold = 10;
+
 const isConfirmedOrApprovedStatus = (status: string | null | undefined) =>
   Boolean(status?.startsWith("confirmed") || status === "approved");
+
+const getDashboardViewLabel = (view: DashboardView) => {
+  if (view === "feed") return "LIVE FEED";
+  if (view === "insights") return "INSIGHTS";
+  if (view === "tracking") return "TRACKING";
+  return "INVENTORY";
+};
 
 const isMeaningfulReason = (reason: string) => {
   const normalized = reason.trim().toLowerCase();
@@ -77,6 +96,20 @@ const areOrdersEqual = (current: Order[], next: Order[]) => {
       order.estimated_delivery_date === nextOrder.estimated_delivery_date &&
       (order.customers?.name || "") === (nextOrder.customers?.name || "") &&
       (order.customers?.address || "") === (nextOrder.customers?.address || "")
+    );
+  });
+};
+
+const areInventoryItemsEqual = (current: InventoryItem[], next: InventoryItem[]) => {
+  if (current.length !== next.length) return false;
+
+  return current.every((item, index) => {
+    const nextItem = next[index];
+    return (
+      item.item_name === nextItem.item_name &&
+      item.category === nextItem.category &&
+      Number(item.current_stock) === Number(nextItem.current_stock) &&
+      Number(item.price_per_unit ?? 0) === Number(nextItem.price_per_unit ?? 0)
     );
   });
 };
@@ -159,7 +192,7 @@ export default function OrderFeed() {
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "confirmed" | "flagged">("all");
-  const [dashboardView, setDashboardView] = useState<"feed" | "insights" | "tracking">("feed");
+  const [dashboardView, setDashboardView] = useState<DashboardView>("feed");
   const [isOrderModalOpen, setIsOrderModalOpen] = useState(false);
   const [hasOpenedWhatsApp, setHasOpenedWhatsApp] = useState(
     () => localStorage.getItem("nudge-whatsapp-opened") === "true"
@@ -175,6 +208,9 @@ export default function OrderFeed() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [trackingOrders, setTrackingOrders] = useState<Order[]>([]);
   const [loadingTrackingOrders, setLoadingTrackingOrders] = useState(false);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [loadingInventory, setLoadingInventory] = useState(false);
+  const [inventoryError, setInventoryError] = useState<string | null>(null);
   const [globalStats, setGlobalStats] = useState({ totalProcessed: 0, totalFlagged: 0, uniqueCustomers: 0 });
   const [loadingGlobalStats, setLoadingGlobalStats] = useState(true);
 
@@ -387,6 +423,50 @@ export default function OrderFeed() {
       window.clearInterval(intervalId);
     };
   }, [dashboardView, selectedCustomerId]);
+
+  useEffect(() => {
+    if (dashboardView !== "inventory") return;
+
+    let active = true;
+    async function fetchInventory(showLoading = true) {
+      try {
+        if (showLoading) setLoadingInventory(true);
+        setInventoryError(null);
+
+        const { data, error } = await supabase
+          .from("inventory")
+          .select("item_name, category, current_stock, price_per_unit")
+          .order("category", { ascending: true, nullsFirst: false })
+          .order("current_stock", { ascending: true });
+
+        if (error) throw error;
+        if (active) {
+          const nextInventory = (data as unknown as InventoryItem[]) || [];
+          setInventoryItems((currentInventory) =>
+            areInventoryItemsEqual(currentInventory, nextInventory) ? currentInventory : nextInventory
+          );
+        }
+      } catch (err: any) {
+        if (active) {
+          setInventoryError(err.message || "Failed to fetch inventory");
+        }
+      } finally {
+        if (active) {
+          if (showLoading) setLoadingInventory(false);
+        }
+      }
+    }
+
+    fetchInventory();
+    const intervalId = window.setInterval(() => {
+      fetchInventory(false);
+    }, 3000);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [dashboardView]);
 
   // Compute distinct customers list and global order stats reactively
   useEffect(() => {
@@ -701,6 +781,15 @@ export default function OrderFeed() {
     return `Estimated delivery: ${fallbackDays} day(s)`;
   };
 
+  const formatPrice = (price: number | null) => {
+    if (price === null || Number.isNaN(Number(price))) return "—";
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      maximumFractionDigits: 2,
+    }).format(Number(price));
+  };
+
   const getTrackingStatus = (dateString: string | null) => {
     if (!dateString) return { label: "", color: "var(--muted-strong)" };
 
@@ -1012,7 +1101,10 @@ export default function OrderFeed() {
           <div style={{ flex: 1, overflowY: "auto", padding: "0 12px 12px" }}>
             {/* Live Feed button */}
             <button
-              onClick={() => setSelectedCustomerId(null)}
+              onClick={() => {
+                setSelectedCustomerId(null);
+                setDashboardView("feed");
+              }}
               style={{
                 width: "100%",
                 textAlign: "left",
@@ -1059,7 +1151,10 @@ export default function OrderFeed() {
                 return (
                   <button
                     key={cust.id}
-                    onClick={() => setSelectedCustomerId(cust.id)}
+                    onClick={() => {
+                      setSelectedCustomerId(cust.id);
+                      if (dashboardView === "inventory") setDashboardView("feed");
+                    }}
                     className={`sidebar-customer-button ${isActive ? "sidebar-customer-button--active" : ""}`}
                   >
                     <span className="sidebar-customer-copy">
@@ -1104,7 +1199,7 @@ export default function OrderFeed() {
                     Tracking
                   </h1>
                   <div className="dashboard-view-toggle" aria-label="Dashboard view">
-                    {(["feed", "insights", "tracking"] as const).map((view) => (
+                    {dashboardViews.map((view) => (
                       <button
                         key={view}
                         type="button"
@@ -1113,7 +1208,7 @@ export default function OrderFeed() {
                         }`}
                         onClick={() => setDashboardView(view)}
                       >
-                        {view === "feed" ? "LIVE FEED" : view === "insights" ? "INSIGHTS" : "TRACKING"}
+                        {getDashboardViewLabel(view)}
                       </button>
                     ))}
                   </div>
@@ -1172,6 +1267,101 @@ export default function OrderFeed() {
                   )}
                 </div>
               )}
+            </div>
+          ) : dashboardView === "inventory" ? (
+            <div>
+              <header style={{ padding: "24px 0 20px", borderBottom: "1px solid var(--rule)", marginBottom: 28 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <h1
+                    className="font-display"
+                    style={{ fontSize: 24, fontWeight: 700, margin: 0, letterSpacing: "-0.02em" }}
+                  >
+                    Inventory
+                  </h1>
+                  <div className="dashboard-view-toggle" aria-label="Dashboard view">
+                    {dashboardViews.map((view) => (
+                      <button
+                        key={view}
+                        type="button"
+                        className={`dashboard-view-toggle__button ${
+                          dashboardView === view ? "dashboard-view-toggle__button--active" : ""
+                        }`}
+                        onClick={() => setDashboardView(view)}
+                      >
+                        {getDashboardViewLabel(view)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0 0" }}>
+                  Stock monitor sorted by category, then lowest available units.
+                </p>
+              </header>
+
+              <div className="viewfinder-card inventory-console">
+                <div className="inventory-console__head">
+                  <div>
+                    <span className="label-caps">Inventory Signal</span>
+                    <p className="font-mono-num inventory-console__summary">
+                      {loadingInventory ? "SCANNING" : `${inventoryItems.length} SKU${inventoryItems.length === 1 ? "" : "S"}`}
+                    </p>
+                  </div>
+                  <div className="inventory-console__legend">
+                    <span className="inventory-stock-badge inventory-stock-badge--low">LOW &lt; {lowStockThreshold}</span>
+                    <span className="inventory-stock-badge inventory-stock-badge--ok">STABLE</span>
+                  </div>
+                </div>
+
+                {loadingInventory ? (
+                  <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>Loading inventory…</p>
+                ) : inventoryError ? (
+                  <p style={{ color: "var(--rust)", fontSize: 13, margin: 0 }}>{inventoryError}</p>
+                ) : inventoryItems.length === 0 ? (
+                  <p style={{ color: "var(--muted)", fontSize: 13, margin: 0 }}>No inventory rows found.</p>
+                ) : (
+                  <div className="inventory-table-wrap">
+                    <table className="inventory-table">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th>Category</th>
+                          <th>Current Stock</th>
+                          <th>Price / Unit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {inventoryItems.map((item) => {
+                          const stock = Number(item.current_stock ?? 0);
+                          const isLowStock = stock < lowStockThreshold;
+
+                          return (
+                            <tr
+                              key={`${item.category || "uncategorized"}-${item.item_name}`}
+                              className={isLowStock ? "inventory-table__row--low" : ""}
+                            >
+                              <td>
+                                <span className="inventory-item-name">{item.item_name}</span>
+                              </td>
+                              <td>
+                                <span className="inventory-category">{item.category || "Uncategorized"}</span>
+                              </td>
+                              <td>
+                                <span className="font-mono-num inventory-stock-cell">
+                                  {stock}
+                                  {isLowStock && (
+                                    <span className="inventory-stock-badge inventory-stock-badge--low">LOW</span>
+                                  )}
+                                </span>
+                              </td>
+                              <td className="font-mono-num">{formatPrice(item.price_per_unit)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
           ) : selectedCustomerId !== null ? (
             <div>
@@ -1519,7 +1709,7 @@ export default function OrderFeed() {
                   </span>
 
                   <div className="dashboard-view-toggle" aria-label="Dashboard view">
-                    {(["feed", "insights", "tracking"] as const).map((view) => (
+                    {dashboardViews.map((view) => (
                       <button
                         key={view}
                         type="button"
@@ -1528,7 +1718,7 @@ export default function OrderFeed() {
                         }`}
                         onClick={() => setDashboardView(view)}
                       >
-                        {view === "feed" ? "LIVE FEED" : view === "insights" ? "INSIGHTS" : "TRACKING"}
+                        {getDashboardViewLabel(view)}
                       </button>
                     ))}
                   </div>
