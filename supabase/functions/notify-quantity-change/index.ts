@@ -23,6 +23,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+function isMeaningfulReason(reason: string): boolean {
+  const normalized = reason.trim().toLowerCase();
+  if (!normalized) return true;
+
+  const words = normalized.match(/[a-z]{3,}/g) ?? [];
+  const uniqueWords = new Set(words);
+  const hasReasonCue =
+    /\b(customer|client|requested|asked|stock|inventory|available|availability|shortage|supply|warehouse|delivery|duplicate|mistake|error|typo|correction|changed|adjusted|limit|space|damaged|expired|packed|dispatch|vendor|supplier)\b/.test(
+      normalized
+    );
+  const repeatedChunk = /^([a-z]{2,6})\1{2,}$/.test(normalized.replace(/[^a-z]/g, ""));
+
+  return (
+    normalized.length >= 12 &&
+    words.length >= 3 &&
+    uniqueWords.size >= 2 &&
+    hasReasonCue &&
+    !repeatedChunk
+  );
+}
+
 // ── Twilio send helper (mirrors whatsapp-webhook pattern) ──────────────────
 async function sendWhatsAppMessage(to: string, body: string): Promise<string> {
   const accountSid = Deno.env.get("TWILIO_ACCOUNT_SID")!;
@@ -140,6 +161,14 @@ Deno.serve(async (req: Request) => {
       `[notify-quantity-change] Processing orderId=${orderId} newQty=${newQty} item="${item}" customer="${customerName}" hasReason=${!!reason}`
     );
 
+    const trimmedReason = reason?.trim() ?? "";
+    if (trimmedReason && !isMeaningfulReason(trimmedReason)) {
+      return new Response(
+        JSON.stringify({ ok: false, error: "Reason must be meaningful or left blank" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // ── Look up customer phone server-side (safe: uses service role key) ──
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -172,7 +201,6 @@ Deno.serve(async (req: Request) => {
 
     // ── Build the WhatsApp message body ────────────────────────────────────
     let messageBody: string;
-    const trimmedReason = reason?.trim() ?? "";
 
     if (trimmedReason.length > 0) {
       // AI rewrite

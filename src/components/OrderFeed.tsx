@@ -36,6 +36,27 @@ interface Order {
 const isConfirmedOrApprovedStatus = (status: string | null | undefined) =>
   Boolean(status?.startsWith("confirmed") || status === "approved");
 
+const isMeaningfulReason = (reason: string) => {
+  const normalized = reason.trim().toLowerCase();
+  if (!normalized) return true;
+
+  const words = normalized.match(/[a-z]{3,}/g) ?? [];
+  const uniqueWords = new Set(words);
+  const hasReasonCue =
+    /\b(customer|client|requested|asked|stock|inventory|available|availability|shortage|supply|warehouse|delivery|duplicate|mistake|error|typo|correction|changed|adjusted|limit|space|damaged|expired|packed|dispatch|vendor|supplier)\b/.test(
+      normalized
+    );
+  const repeatedChunk = /^([a-z]{2,6})\1{2,}$/.test(normalized.replace(/[^a-z]/g, ""));
+
+  return (
+    normalized.length >= 12 &&
+    words.length >= 3 &&
+    uniqueWords.size >= 2 &&
+    hasReasonCue &&
+    !repeatedChunk
+  );
+};
+
 const areOrdersEqual = (current: Order[], next: Order[]) => {
   if (current.length !== next.length) return false;
 
@@ -458,6 +479,8 @@ export default function OrderFeed() {
       } finally {
         setLoadingGlobalStats(false);
       }
+    }
+
     fetchGlobalData();
   }, [orders]);
 
@@ -502,12 +525,9 @@ export default function OrderFeed() {
     }
 
     const trimmedReason = modifyReason.trim();
-    if (trimmedReason.length > 0) {
-      const hasRealWord = /[a-zA-Z]{3,}/.test(trimmedReason);
-      if (trimmedReason.length < 8 || !hasRealWord) {
-        setModifyError("Please enter a meaningful reason, or leave it blank.");
-        return;
-      }
+    if (trimmedReason.length > 0 && !isMeaningfulReason(trimmedReason)) {
+      setModifyError("Please enter a real reason, or leave it blank.");
+      return;
     }
 
     setModifyLoading(true);
@@ -1916,6 +1936,25 @@ export default function OrderFeed() {
                             </p>
                           </div>
                         )}
+
+                        <div className="order-action-row">
+                          <button
+                            id={`modify-qty-feed-${order.id}`}
+                            className="order-action-btn order-action-btn--modify"
+                            onClick={() => openModifyModal(order)}
+                            title="Modify quantity"
+                          >
+                            Modify Qty
+                          </button>
+                          <button
+                            id={`delete-order-feed-${order.id}`}
+                            className="order-action-btn order-action-btn--delete"
+                            onClick={() => setDeleteTargetOrder(order)}
+                            title="Delete order"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
                     );
                     })}
@@ -2103,6 +2142,137 @@ export default function OrderFeed() {
                 </button>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {deleteTargetOrder && (
+        <div className="action-modal-overlay" onClick={() => !deleteLoading && setDeleteTargetOrder(null)}>
+          <div className="action-modal viewfinder-card" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="action-modal__close"
+              onClick={() => setDeleteTargetOrder(null)}
+              disabled={deleteLoading}
+              aria-label="Close delete confirmation"
+            >
+              x
+            </button>
+            <h2 className="font-display action-modal__title">Delete Order</h2>
+            <p className="action-modal__subtitle">
+              Remove {deleteTargetOrder.quantity} {deleteTargetOrder.item} for{" "}
+              {deleteTargetOrder.customers?.name || "this customer"} from the order log?
+            </p>
+            <div className="action-modal__btn-row">
+              <button
+                type="button"
+                className="action-modal__btn action-modal__btn--cancel"
+                onClick={() => setDeleteTargetOrder(null)}
+                disabled={deleteLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="action-modal__btn action-modal__btn--primary-rust"
+                onClick={() => handleDeleteOrder(deleteTargetOrder.id)}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? (
+                  <>
+                    <span className="inline-spinner" />
+                    Deleting
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modifyTargetOrder && (
+        <div className="action-modal-overlay" onClick={() => !modifyLoading && setModifyTargetOrder(null)}>
+          <div className="action-modal viewfinder-card" onClick={(event) => event.stopPropagation()}>
+            <button
+              type="button"
+              className="action-modal__close"
+              onClick={() => setModifyTargetOrder(null)}
+              disabled={modifyLoading}
+              aria-label="Close quantity editor"
+            >
+              x
+            </button>
+            <h2 className="font-display action-modal__title">Modify Quantity</h2>
+            <p className="action-modal__subtitle">
+              Update only the quantity for {modifyTargetOrder.item}. The customer will be notified on WhatsApp.
+            </p>
+
+            <div className="action-modal__field">
+              <label className="action-modal__label" htmlFor="modify-order-quantity">
+                Quantity
+              </label>
+              <input
+                id="modify-order-quantity"
+                className="action-modal__input font-mono-num"
+                type="number"
+                min="1"
+                step="1"
+                value={modifyQty}
+                onChange={(event) => setModifyQty(event.target.value)}
+                disabled={modifyLoading}
+              />
+            </div>
+
+            <div className="action-modal__field">
+              <label className="action-modal__label" htmlFor="modify-order-reason">
+                Reason optional
+              </label>
+              <textarea
+                id="modify-order-reason"
+                className="action-modal__textarea"
+                value={modifyReason}
+                onChange={(event) => setModifyReason(event.target.value)}
+                placeholder="Example: customer requested fewer units due to low stock space"
+                disabled={modifyLoading}
+              />
+              <p className="action-modal__hint">
+                Leave blank for a generic update. If filled, use a real reason the AI can summarize.
+              </p>
+            </div>
+
+            {modifyError && <p className="action-modal__error">{modifyError}</p>}
+
+            <p className="action-modal__ai-note">
+              The AI will write a short customer-facing message, then the existing WhatsApp sender will notify the customer.
+            </p>
+
+            <div className="action-modal__btn-row">
+              <button
+                type="button"
+                className="action-modal__btn action-modal__btn--cancel"
+                onClick={() => setModifyTargetOrder(null)}
+                disabled={modifyLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="action-modal__btn action-modal__btn--primary-teal"
+                onClick={handleModifyQuantity}
+                disabled={modifyLoading}
+              >
+                {modifyLoading ? (
+                  <>
+                    <span className="inline-spinner" />
+                    Saving
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
