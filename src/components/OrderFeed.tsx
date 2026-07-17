@@ -45,6 +45,16 @@ type DashboardView = "feed" | "insights" | "tracking" | "inventory";
 
 const dashboardViews: DashboardView[] = ["feed", "insights", "tracking", "inventory"];
 const lowStockThreshold = 10;
+const customerStatusMeta = {
+  reviewHistory: {
+    label: "Review history",
+    color: "var(--rust)",
+  },
+  clear: {
+    label: "Clear",
+    color: "var(--ledger-teal)",
+  },
+} as const;
 
 const isConfirmedOrApprovedStatus = (status: string | null | undefined) =>
   Boolean(status?.startsWith("confirmed") || status === "approved");
@@ -236,6 +246,8 @@ export default function OrderFeed() {
   const whatsAppOrderUrl =
     "https://wa.me/+14155238886?text=Hi%2C%20I%20want%20to%20place%20an%20order";
   const whatsappJoinCode = "join middle-past";
+  const placeOrderButtonRef = useRef<HTMLButtonElement | null>(null);
+  const orderModalRef = useRef<HTMLDivElement | null>(null);
 
   const handleOpenWhatsApp = useCallback((rememberJoinClick = false) => {
     if (rememberJoinClick) {
@@ -244,6 +256,45 @@ export default function OrderFeed() {
     }
     window.open(whatsAppOrderUrl, "_blank");
   }, []);
+
+  const closeOrderModal = useCallback(() => {
+    setIsOrderModalOpen(false);
+    window.setTimeout(() => placeOrderButtonRef.current?.focus(), 0);
+  }, []);
+
+  useEffect(() => {
+    if (!isOrderModalOpen) return;
+
+    const focusableSelector =
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    const modal = orderModalRef.current;
+    const focusable = Array.from(modal?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
+    focusable[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeOrderModal();
+        return;
+      }
+
+      if (event.key !== "Tab" || focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeOrderModal, isOrderModalOpen]);
 
   // Clear new order IDs after animation completes
   useEffect(() => {
@@ -1095,6 +1146,19 @@ export default function OrderFeed() {
             <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>
               Select to view order trends
             </p>
+            <div className="sidebar-status-legend" aria-label="Client status legend">
+              {Object.values(customerStatusMeta).map((status) => (
+                <span key={status.label} className="sidebar-status-legend__item">
+                  <span
+                    className="sidebar-customer-status-dot"
+                    style={{ background: status.color }}
+                    aria-hidden="true"
+                    title={status.label}
+                  />
+                  {status.label}
+                </span>
+              ))}
+            </div>
           </div>
 
           {/* Customer list */}
@@ -1147,6 +1211,7 @@ export default function OrderFeed() {
             ) : (
               customers.map((cust) => {
                 const isActive = selectedCustomerId === cust.id;
+                const customerStatus = cust.hasFlagged ? customerStatusMeta.reviewHistory : customerStatusMeta.clear;
 
                 return (
                   <button
@@ -1161,7 +1226,8 @@ export default function OrderFeed() {
                       <span className="sidebar-customer-name-row">
                         <span
                           className="sidebar-customer-status-dot"
-                          style={{ background: cust.hasFlagged ? "var(--rust)" : "var(--ledger-teal)" }}
+                          style={{ background: customerStatus.color }}
+                          title={customerStatus.label}
                           aria-hidden="true"
                         />
                         {isActive && (
@@ -1421,7 +1487,11 @@ export default function OrderFeed() {
                       </div>
                     ) : (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 20 }}>
-                        {Object.keys(historyByItem).map((item) => (
+                        {Object.keys(historyByItem).map((item) => {
+                          const itemHistory = historyByItem[item];
+                          const hasBaselineChart = itemHistory.length >= 3;
+
+                          return (
                           <div key={item} className="viewfinder-card">
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                               <div>
@@ -1429,7 +1499,7 @@ export default function OrderFeed() {
                                   {item}
                                 </h4>
                                 <p style={{ fontSize: 10, color: "var(--muted)", marginTop: 2 }}>
-                                  Quantity over time
+                                  {hasBaselineChart ? "Quantity over time" : "Baseline pending"}
                                 </p>
                               </div>
                               <div style={{ textAlign: "right" }}>
@@ -1443,11 +1513,28 @@ export default function OrderFeed() {
                               </div>
                             </div>
 
+                            {!hasBaselineChart ? (
+                              <div className="baseline-pending-callout">
+                                <span className="label-caps" style={{ fontSize: 9 }}>
+                                  Establishing baseline
+                                </span>
+                                <p className="font-mono-num baseline-pending-callout__count">
+                                  {itemHistory.length} {itemHistory.length === 1 ? "order" : "orders"} recorded
+                                </p>
+                                <div className="baseline-pending-callout__quantities">
+                                  {itemHistory.map((order) => (
+                                    <span key={order.id} className="baseline-pending-callout__quantity">
+                                      #{order.sequence}: {order.quantity}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : (
                             <div style={{ height: 200 }}>
                               <ResponsiveContainer width="100%" height="100%">
                                 <LineChart
-                                  data={historyByItem[item]}
-                                  margin={{ top: 8, right: 8, left: -20, bottom: 5 }}
+                                  data={itemHistory}
+                                  margin={{ top: 14, right: 18, left: -14, bottom: 8 }}
                                 >
                                   <CartesianGrid strokeDasharray="3 3" stroke="var(--rule)" vertical={false} />
                                   <XAxis
@@ -1464,13 +1551,6 @@ export default function OrderFeed() {
                                     stroke="var(--brass)"
                                     strokeDasharray="5 5"
                                     strokeWidth={1.2}
-                                    label={{
-                                      value: `Avg: ${referenceAverages[item]}`,
-                                      position: "insideBottomRight",
-                                      fill: "var(--brass)",
-                                      fontSize: 10,
-                                      fontWeight: "bold",
-                                    }}
                                   />
                                   <Line
                                     type="monotone"
@@ -1489,8 +1569,10 @@ export default function OrderFeed() {
                                 </LineChart>
                               </ResponsiveContainer>
                             </div>
+                            )}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </section>
@@ -2305,6 +2387,7 @@ export default function OrderFeed() {
       <button
         type="button"
         className="floating-place-order"
+        ref={placeOrderButtonRef}
         onClick={() => setIsOrderModalOpen(true)}
       >
         <span className="floating-place-order__dot live-pulse" />
@@ -2312,18 +2395,25 @@ export default function OrderFeed() {
       </button>
 
       {isOrderModalOpen && (
-        <div className="order-modal-overlay" onClick={() => setIsOrderModalOpen(false)}>
-          <div className="order-modal viewfinder-card" onClick={(event) => event.stopPropagation()}>
+        <div className="order-modal-overlay" onClick={closeOrderModal}>
+          <div
+            className="order-modal viewfinder-card"
+            ref={orderModalRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="order-modal-title"
+            onClick={(event) => event.stopPropagation()}
+          >
             <button
               type="button"
               className="order-modal__close"
-              onClick={() => setIsOrderModalOpen(false)}
+              onClick={closeOrderModal}
               aria-label="Close order modal"
             >
               ×
             </button>
 
-            <h2 className="font-display order-modal__title">Order on WhatsApp</h2>
+            <h2 id="order-modal-title" className="font-display order-modal__title">Order on WhatsApp</h2>
 
             <p className="order-modal__copy">First time? Send this code to join:</p>
             <div className="order-modal__code font-mono-num">{whatsappJoinCode}</div>

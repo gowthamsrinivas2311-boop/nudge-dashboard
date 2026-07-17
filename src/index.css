@@ -215,6 +215,26 @@ body {
   border-radius: 50%;
 }
 
+.sidebar-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 10px;
+  margin-top: 12px;
+}
+
+.sidebar-status-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-strong);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .sidebar-customer-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -407,6 +427,43 @@ body {
   background: rgba(78, 140, 124, 0.1);
 }
 
+.baseline-pending-callout {
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border: 1px solid var(--rule);
+  background: var(--ink);
+  padding: 18px;
+  box-sizing: border-box;
+}
+
+.baseline-pending-callout__count {
+  margin: 8px 0 12px;
+  color: var(--brass);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.baseline-pending-callout__quantities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.baseline-pending-callout__quantity {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 4px 8px;
+  border: 1px solid rgba(78, 140, 124, 0.35);
+  color: var(--ledger-teal);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+
 .order-feed-scroll {
   max-height: calc((360px * 2) + 16px);
   overflow-y: auto;
@@ -577,13 +634,32 @@ body {
   align-items: flex-end;
   justify-content: flex-end;
   padding: 24px;
-  background: rgba(18, 25, 21, 0.42);
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(1px);
+  animation: order-modal-backdrop-in 0.16s ease;
 }
 
 .order-modal {
   width: min(360px, calc(100vw - 48px));
   padding: 24px;
   background: var(--ledger-panel);
+  animation: order-modal-in 0.18s ease;
+}
+
+@keyframes order-modal-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes order-modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .order-modal__close {
