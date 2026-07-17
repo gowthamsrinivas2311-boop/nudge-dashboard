@@ -36,6 +36,11 @@ type StockDeductionResult = {
   itemName?: string;
 };
 
+type InventoryPreview = {
+  item_name: string;
+  current_stock: number | string | null;
+};
+
 const supabaseAdmin = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -305,7 +310,40 @@ async function setCustomerAddress(customerId: number, address: string) {
   if (error) throw error;
 }
 
+function normalizeInventoryLookup(value: string) {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, " ");
+  if (normalized.endsWith("ies")) return `${normalized.slice(0, -3)}y`;
+  if (/(ses|xes|zes|ches|shes)$/.test(normalized)) return normalized.slice(0, -2);
+  if (normalized.endsWith("s") && !normalized.endsWith("ss")) return normalized.slice(0, -1);
+  return normalized;
+}
+
+async function previewInventoryMatch(item: string): Promise<InventoryPreview | null> {
+  const { data, error } = await supabaseAdmin
+    .from("inventory")
+    .select("item_name, current_stock")
+    .order("item_name", { ascending: true });
+  if (error) throw error;
+
+  const normalizedItem = item.trim().toLowerCase().replace(/\s+/g, " ");
+  const singularItem = normalizeInventoryLookup(item);
+  const rows = (data ?? []) as InventoryPreview[];
+
+  return (
+    rows.find((row) => row.item_name.trim().toLowerCase().replace(/\s+/g, " ") === normalizedItem) ??
+    rows.find((row) => normalizeInventoryLookup(row.item_name) === singularItem) ??
+    null
+  );
+}
+
 async function checkAndDeductStock(item: string, quantity: number): Promise<StockDeductionResult> {
+  const inventoryPreview = await previewInventoryMatch(item);
+  console.log(
+    `[whatsapp-webhook] Stock check starting item="${item}" quantity=${quantity} inventoryMatch=${
+      inventoryPreview ? JSON.stringify(inventoryPreview) : "null"
+    }`
+  );
+
   const { data, error } = await supabaseAdmin.rpc("check_and_deduct_inventory", {
     p_item_name: item,
     p_quantity: quantity,
@@ -458,9 +496,10 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
 
 function estimateDeliveryDate(item: string) {
   const days = /electronics/i.test(item) ? 5 : /stationery|office/i.test(item) ? 3 : 2;
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  const now = new Date();
+  const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
+  istDate.setUTCDate(istDate.getUTCDate() + days);
+  return istDate.toISOString().slice(0, 10);
 }
 
 function formatDate(dateString: string) {
