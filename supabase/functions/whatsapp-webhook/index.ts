@@ -176,6 +176,8 @@ async function getCustomerByPhone(phone: string): Promise<Customer | null> {
     .from("customers")
     .select("id, name, phone, address")
     .eq("phone", phone)
+    .order("id", { ascending: true })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw error;
