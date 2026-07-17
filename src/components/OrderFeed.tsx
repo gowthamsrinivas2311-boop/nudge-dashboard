@@ -1303,7 +1303,7 @@ export default function OrderFeed() {
                   <div>
                     <span className="label-caps">Inventory Signal</span>
                     <p className="font-mono-num inventory-console__summary">
-                      {loadingInventory ? "SCANNING" : `${inventoryItems.length} SKU${inventoryItems.length === 1 ? "" : "S"}`}
+                      {loadingInventory ? "SCANNING" : `${inventoryItems.length} Stock Keeping Unit${inventoryItems.length === 1 ? "" : "s"}`}
                     </p>
                   </div>
                   <div className="inventory-console__legend">

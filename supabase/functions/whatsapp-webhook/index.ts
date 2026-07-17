@@ -17,11 +17,14 @@ type OrderDraft = {
   item?: string;
   quantity?: number;
   address?: string;
+  availableQuantity?: number;
+  requestedQuantity?: number;
+  rawMessage?: string;
 };
 
 type ConversationState = {
   phone: string;
-  step: "ask_name" | "ask_order" | "ask_address";
+  step: "ask_name" | "ask_order" | "ask_address" | "awaiting_partial_stock_decision";
   partial_data: OrderDraft;
 };
 
@@ -282,8 +285,22 @@ async function checkAndDeductStock(item: string, quantity: number): Promise<Stoc
   };
 }
 
+function partialStockMessage(item: string, requested: number, available: number) {
+  return `Only ${available} units of ${item} are available right now — would you like us to deliver ${available} instead, or would you prefer to cancel this order?`;
+}
+
 function outOfStockMessage(item: string, available: number) {
   return `Sorry, we only have ${available} units of ${item} available right now, so we can't confirm this order.`;
+}
+
+function isAffirmative(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return /^(yes|yeah|yep|sure|ok|okay|go ahead|proceed|fine|alright|correct|right|confirm|please do|let's do it|\by\b)/i.test(normalized);
+}
+
+function isNegative(message: string): boolean {
+  const normalized = message.trim().toLowerCase();
+  return /^(no|nope|nah|cancel|forget it|never mind|stop|don't|do not|not now|no thanks|\bn\b)/i.test(normalized);
 }
 
 async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, rawMessage: string) {
@@ -310,9 +327,54 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
     ? `Unusual quantity for ${draft.item}: ${draft.quantity} vs average ${average!.toFixed(1)}`
     : null;
   const estimatedDeliveryDate = estimateDeliveryDate(draft.item);
-  const stockResult = isFlagged ? null : await checkAndDeductStock(draft.item, draft.quantity);
-  const status = isFlagged ? "flagged" : stockResult?.ok ? "confirmed" : "rejected_out_of_stock";
 
+  // Check stock for non-flagged orders
+  if (!isFlagged) {
+    const stockResult = await checkAndDeductStock(draft.item, draft.quantity);
+
+    // Partial stock: stock > 0 but < requested — ask customer
+    if (stockResult.found && !stockResult.deducted && (stockResult.available ?? 0) > 0) {
+      const partialDraft: OrderDraft = {
+        customerName: draft.customerName,
+        item: draft.item,
+        quantity: draft.quantity,
+        address: draft.address,
+        availableQuantity: stockResult.available,
+        requestedQuantity: draft.quantity,
+        rawMessage: rawMessage,
+      };
+      await saveConversation(phone, "awaiting_partial_stock_decision", partialDraft);
+      await sendWhatsAppMessage(phone, partialStockMessage(draft.item, draft.quantity, stockResult.available!));
+      console.log(`[whatsapp-webhook] Partial stock for item=${draft.item} requested=${draft.quantity} available=${stockResult.available}`);
+      return;
+    }
+
+    // Out of stock: available is 0
+    if (stockResult.found && !stockResult.deducted && (stockResult.available ?? 0) === 0) {
+      const status = "rejected_out_of_stock";
+      const { data: order, error: orderErr } = await supabaseAdmin
+        .from("orders")
+        .insert({
+          customer_id: customer.id,
+          raw_message: rawMessage,
+          item: draft.item,
+          quantity: draft.quantity,
+          flagged: false,
+          flag_reason: null,
+          status,
+          estimated_delivery_date: null,
+        })
+        .select("id")
+        .single();
+      if (orderErr) throw orderErr;
+
+      await sendWhatsAppMessage(phone, outOfStockMessage(draft.item, stockResult.available ?? 0));
+      console.log(`[whatsapp-webhook] Rejected orderId=${order.id} out_of_stock item=${draft.item}`);
+      return;
+    }
+  }
+
+  const status = isFlagged ? "flagged" : "confirmed";
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("orders")
     .insert({
@@ -335,12 +397,6 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
       `This order looks unusual compared with the customer's usual pattern and has been flagged for review. Reply APPROVE, REJECT, or WHY.`
     );
   } else {
-    if (!stockResult?.ok) {
-      await sendWhatsAppMessage(phone, outOfStockMessage(draft.item, stockResult?.available ?? 0));
-      console.log(`[whatsapp-webhook] Rejected orderId=${order.id} out_of_stock item=${draft.item}`);
-      return;
-    }
-
     await sendWhatsAppMessage(
       phone,
       `Order confirmed: ${draft.quantity} ${draft.item}. Estimated delivery: ${formatDate(estimatedDeliveryDate)}.`
@@ -421,6 +477,47 @@ Deno.serve(async (req: Request) => {
     const existingState = await getConversation(phone);
     const customer = await getCustomerByPhone(phone);
     let draft: OrderDraft = { ...(existingState?.partial_data ?? {}) };
+
+    // ── Handle partial stock decision ────────────────────────────────
+    if (existingState?.step === "awaiting_partial_stock_decision") {
+      const pd = existingState.partial_data;
+      const availableQty = pd.availableQuantity ?? 0;
+      const item = pd.item ?? "";
+      const rawMsg = pd.rawMessage ?? message;
+
+      if (isAffirmative(message)) {
+        // Customer agreed to reduced quantity
+        const adjustedDraft: Required<OrderDraft> = {
+          customerName: pd.customerName ?? "",
+          item: pd.item ?? "",
+          quantity: availableQty,
+          address: pd.address ?? "",
+        };
+
+        await processResolvedOrder(phone, adjustedDraft, rawMsg);
+        await clearConversation(phone);
+        return new Response("<Response></Response>", {
+          headers: { ...corsHeaders, "Content-Type": "text/xml" },
+        });
+      } else if (isNegative(message)) {
+        // Customer declined — cancel order politely
+        await sendWhatsAppMessage(
+          phone,
+          `No problem. Your order for ${item} has been cancelled. Feel free to reach out if you'd like to order something else.`
+        );
+        await clearConversation(phone);
+        console.log(`[whatsapp-webhook] Partial stock declined by customer. item=${item}`);
+        return new Response("<Response></Response>", {
+          headers: { ...corsHeaders, "Content-Type": "text/xml" },
+        });
+      } else {
+        // Ambiguous response — re-ask
+        await saveConversation(phone, "awaiting_partial_stock_decision", draft);
+        return twiml(
+          `Sorry, I didn't quite catch that. Only ${availableQty} units of ${item} are available right now. Reply YES to go ahead with ${availableQty}, or NO to cancel this order.`
+        );
+      }
+    }
 
     if (existingState?.step === "ask_name") {
       draft.customerName = cleanName(message);
