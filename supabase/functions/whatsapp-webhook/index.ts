@@ -375,7 +375,7 @@ Deno.serve(async (req: Request) => {
       };
 
       if (!extracted.hasOrderIntent && !draft.item && !draft.quantity) {
-        return twiml("Please send your order like: Rahul wants 20 soap.");
+        return twiml("Hi! Just tell us what you'd like to order and we'll take it from there.");
       }
     }
 
