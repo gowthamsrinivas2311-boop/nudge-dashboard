@@ -13,14 +13,10 @@ type Customer = {
 };
 
 type OrderDraft = {
-  orderId?: number;
   customerName?: string;
   item?: string;
   quantity?: number;
   address?: string;
-  availableQuantity?: number;
-  requestedQuantity?: number;
-  rawMessage?: string;
 };
 
 type ResolvedOrderDraft = OrderDraft & {
@@ -32,7 +28,7 @@ type ResolvedOrderDraft = OrderDraft & {
 
 type ConversationState = {
   phone: string;
-  step: "ask_name" | "ask_order" | "ask_address" | "awaiting_partial_stock_decision" | "updating_address";
+  step: "ask_name" | "ask_order" | "ask_address" | "updating_address";
   partial_data: OrderDraft;
 };
 
@@ -381,66 +377,35 @@ async function checkAndDeductStock(item: string, quantity: number): Promise<Stoc
   };
 }
 
-function partialStockMessage(item: string, requested: number, available: number) {
-  return `Only ${available} units of ${item} are available right now — would you like us to deliver ${available} instead, or would you prefer to cancel this order?`;
+function stockLimitMessage(item: string, requested: number, available: number) {
+  if (available <= 0) {
+    return `Sorry, none of ${item} is available right now, so we can't fulfill an order of ${requested}. The maximum you can currently order is 0.`;
+  }
+  return `Sorry, we only have ${available} units of ${item} in stock right now, so we can't fulfill an order of ${requested}. You're welcome to place an order for up to ${available} ${item} instead.`;
 }
 
-function outOfStockMessage(item: string, available: number) {
-  return `Sorry, we only have ${available} units of ${item} available right now, so we can't confirm this order.`;
+function stockNotFoundMessage(item: string) {
+  return `Sorry, I couldn't verify stock for ${item} right now, so I can't place this order yet.`;
 }
 
-function isAffirmative(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  return [
-    "yes",
-    "yeah",
-    "yep",
-    "sure",
-    "ok",
-    "okay",
-    "go ahead",
-    "deliver them",
-    "deliver it",
-    "that's fine",
-    "proceed",
-    "confirm",
-  ].some((phrase) => normalized.includes(phrase));
-}
-
-function isNegative(message: string): boolean {
-  const normalized = message.trim().toLowerCase();
-  return ["no", "nope", "cancel", "don't", "never mind", "skip it"].some((phrase) =>
-    normalized.includes(phrase)
-  );
-}
-
-async function handleStockBeforeConfirmation(phone: string, draft: ResolvedOrderDraft, rawMessage: string) {
+async function checkStockAndDeductForConfirmation(phone: string, draft: ResolvedOrderDraft) {
   const stockResult = await checkAndDeductStock(draft.item, draft.quantity);
 
-  if (stockResult.found && !stockResult.deducted && (stockResult.available ?? 0) > 0) {
-    const matchedItem = stockResult.itemName ?? draft.item;
-    const partialDraft: OrderDraft = {
-      orderId: draft.orderId,
-      customerName: draft.customerName,
-      item: matchedItem,
-      quantity: draft.quantity,
-      address: draft.address,
-      availableQuantity: stockResult.available,
-      requestedQuantity: draft.quantity,
-      rawMessage,
-    };
-    await saveConversation(phone, "awaiting_partial_stock_decision", partialDraft);
-    await sendWhatsAppMessage(phone, partialStockMessage(matchedItem, draft.quantity, stockResult.available!));
-    console.log(`[whatsapp-webhook] Partial stock for item=${matchedItem} requested=${draft.quantity} available=${stockResult.available}`);
-    return { confirmed: false, rejected: false };
+  if (!stockResult.found) {
+    await sendWhatsAppMessage(phone, stockNotFoundMessage(draft.item));
+    return { canConfirm: false, itemName: draft.item };
   }
 
-  if (stockResult.found && !stockResult.deducted && (stockResult.available ?? 0) === 0) {
-    await sendWhatsAppMessage(phone, outOfStockMessage(draft.item, stockResult.available ?? 0));
-    return { confirmed: false, rejected: true };
+  const matchedItem = stockResult.itemName ?? draft.item;
+  if (!stockResult.deducted) {
+    const available = stockResult.available ?? 0;
+    await sendWhatsAppMessage(phone, stockLimitMessage(matchedItem, draft.quantity, available));
+    console.log(`[whatsapp-webhook] Stock rejected item=${matchedItem} requested=${draft.quantity} available=${available}`);
+    return { canConfirm: false, itemName: matchedItem };
   }
 
-  return { confirmed: true, rejected: false };
+  console.log(`[whatsapp-webhook] Stock deducted item=${matchedItem} quantity=${draft.quantity}`);
+  return { canConfirm: true, itemName: matchedItem };
 }
 
 async function processResolvedOrder(phone: string, draft: ResolvedOrderDraft, rawMessage: string) {
@@ -469,28 +434,11 @@ async function processResolvedOrder(phone: string, draft: ResolvedOrderDraft, ra
   const estimatedDeliveryDate = estimateDeliveryDate(draft.item);
 
   if (!isFlagged) {
-    const stockDecision = await handleStockBeforeConfirmation(phone, draft, rawMessage);
-    if (!stockDecision.confirmed) {
-      if (stockDecision.rejected) {
-        const { data: order, error: orderErr } = await supabaseAdmin
-          .from("orders")
-          .insert({
-            customer_id: customer.id,
-            raw_message: rawMessage,
-            item: draft.item,
-            quantity: draft.quantity,
-            flagged: false,
-            flag_reason: null,
-            status: "rejected_out_of_stock",
-            estimated_delivery_date: null,
-          })
-          .select("id")
-          .single();
-        if (orderErr) throw orderErr;
-        console.log(`[whatsapp-webhook] Rejected orderId=${order.id} out_of_stock item=${draft.item}`);
-      }
+    const stockDecision = await checkStockAndDeductForConfirmation(phone, draft);
+    if (!stockDecision.canConfirm) {
       return;
     }
+    draft.item = stockDecision.itemName;
   }
 
   const status = isFlagged ? "flagged" : "confirmed";
@@ -560,27 +508,23 @@ async function handleStatusCommand(phone: string, message: string) {
   }
 
   if (command === "APPROVE") {
-    const stockDecision = await handleStockBeforeConfirmation(
-      phone,
-      {
-        orderId: Number(order.id),
-        customerName: "Customer",
-        item: String(order.item),
-        quantity: Number(order.quantity),
-        address: "",
-      },
-      message
-    );
-    if (!stockDecision.confirmed) {
-      if (stockDecision.rejected) {
+    const stockResult = await checkAndDeductStock(String(order.item), Number(order.quantity));
+    const matchedItem = stockResult.itemName ?? String(order.item);
+
+    if (!stockResult.found) {
+      return stockNotFoundMessage(String(order.item));
+    }
+
+    if (!stockResult.deducted) {
       const { error: updateErr } = await supabaseAdmin
         .from("orders")
         .update({ status: "rejected_out_of_stock" })
         .eq("id", order.id);
       if (updateErr) throw updateErr;
-      }
-      return " ";
+      return stockLimitMessage(matchedItem, Number(order.quantity), stockResult.available ?? 0);
     }
+
+    console.log(`[whatsapp-webhook] Stock deducted item=${matchedItem} quantity=${Number(order.quantity)} for approved orderId=${order.id}`);
   }
 
   const nextStatus = command === "APPROVE" ? "approved" : "rejected";
@@ -608,67 +552,6 @@ Deno.serve(async (req: Request) => {
     const existingState = await getConversation(phone);
     const customer = await getCustomerByPhone(phone);
     let draft: OrderDraft = { ...(existingState?.partial_data ?? {}) };
-
-    // ── Handle partial stock decision ────────────────────────────────
-    if (existingState?.step === "awaiting_partial_stock_decision") {
-      const pd = existingState.partial_data;
-      const availableQty = pd.availableQuantity ?? 0;
-      const item = pd.item ?? "";
-      const rawMsg = pd.rawMessage ?? message;
-
-      if (isAffirmative(message)) {
-        const adjustedDraft: ResolvedOrderDraft = {
-          orderId: pd.orderId,
-          customerName: pd.customerName ?? "",
-          item: pd.item ?? "",
-          quantity: availableQty,
-          address: pd.address ?? "",
-        };
-
-        if (pd.orderId) {
-          const stockDecision = await handleStockBeforeConfirmation(phone, adjustedDraft, rawMsg);
-          if (!stockDecision.confirmed) return new Response("<Response></Response>", {
-            headers: { ...corsHeaders, "Content-Type": "text/xml" },
-          });
-
-          const { error: updateErr } = await supabaseAdmin
-            .from("orders")
-            .update({
-              item: adjustedDraft.item,
-              quantity: adjustedDraft.quantity,
-              status: "approved",
-              estimated_delivery_date: estimateDeliveryDate(adjustedDraft.item),
-            })
-            .eq("id", pd.orderId);
-          if (updateErr) throw updateErr;
-          await sendWhatsAppMessage(phone, `Order approved: ${adjustedDraft.quantity} ${adjustedDraft.item}.`);
-        } else {
-          await processResolvedOrder(phone, adjustedDraft, rawMsg);
-        }
-        await clearConversation(phone);
-        return new Response("<Response></Response>", {
-          headers: { ...corsHeaders, "Content-Type": "text/xml" },
-        });
-      } else if (isNegative(message)) {
-        // Customer declined — cancel order politely
-        await sendWhatsAppMessage(
-          phone,
-          `No problem. Your order for ${item} has been cancelled. Feel free to reach out if you'd like to order something else.`
-        );
-        await clearConversation(phone);
-        console.log(`[whatsapp-webhook] Partial stock declined by customer. item=${item}`);
-        return new Response("<Response></Response>", {
-          headers: { ...corsHeaders, "Content-Type": "text/xml" },
-        });
-      } else {
-        // Ambiguous response — re-ask
-        await saveConversation(phone, "awaiting_partial_stock_decision", draft);
-        return twiml(
-          `Sorry, I didn't quite catch that. Only ${availableQty} units of ${item} are available right now. Reply YES to go ahead with ${availableQty}, or NO to cancel this order.`
-        );
-      }
-    }
-
     if (existingState?.step === "updating_address") {
       if (!looksLikeAddress(message)) {
         await saveConversation(phone, "updating_address", draft);
