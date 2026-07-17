@@ -228,6 +228,15 @@ body {
   opacity: 0.5;
 }
 
+.sidebar-customer-address {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .distribution-customer-row {
   display: flex;
   align-items: center;

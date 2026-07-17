@@ -17,6 +17,7 @@ import PatternStrip from "./PatternStrip";
 
 interface Customer {
   name: string;
+  address: string | null;
 }
 
 interface Order {
@@ -74,7 +75,8 @@ const areOrdersEqual = (current: Order[], next: Order[]) => {
       order.status === nextOrder.status &&
       order.created_at === nextOrder.created_at &&
       order.estimated_delivery_date === nextOrder.estimated_delivery_date &&
-      (order.customers?.name || "") === (nextOrder.customers?.name || "")
+      (order.customers?.name || "") === (nextOrder.customers?.name || "") &&
+      (order.customers?.address || "") === (nextOrder.customers?.address || "")
     );
   });
 };
@@ -82,6 +84,7 @@ const areOrdersEqual = (current: Order[], next: Order[]) => {
 interface CustomerSummary {
   id: number;
   name: string;
+  address: string | null;
   count: number;
   hasFlagged: boolean;
   latestOrderAt: string;
@@ -237,7 +240,8 @@ export default function OrderFeed() {
             created_at,
             estimated_delivery_date,
             customers (
-              name
+              name,
+              address
             )
           `)
           .order("created_at", { ascending: false })
@@ -391,7 +395,7 @@ export default function OrderFeed() {
         setLoadingGlobalStats(true);
         const { data, error } = await supabase
           .from("orders")
-          .select("id, customer_id, item, quantity, status, flag_reason, flagged, created_at, estimated_delivery_date, customers(name)");
+          .select("id, customer_id, item, quantity, status, flag_reason, flagged, created_at, estimated_delivery_date, customers(name, address)");
         if (error) throw error;
 
         let totalProcessed = 0;
@@ -400,6 +404,7 @@ export default function OrderFeed() {
           number,
           {
             name: string;
+            address: string | null;
             count: number;
             hasFlagged: boolean;
             latestOrderAt: string;
@@ -414,6 +419,7 @@ export default function OrderFeed() {
 
           if (row.customer_id) {
             const name = row.customers?.name || "Unknown Customer";
+            const address = row.customers?.address || null;
             const isFlaggedOrder =
               row.flagged === true ||
               row.status === "flagged" ||
@@ -421,6 +427,7 @@ export default function OrderFeed() {
               row.status === "rejected";
             const current = customerMap.get(row.customer_id) || {
               name,
+              address,
               count: 0,
               hasFlagged: false,
               latestOrderAt: row.created_at,
@@ -434,6 +441,7 @@ export default function OrderFeed() {
 
             customerMap.set(row.customer_id, {
               name,
+              address: current.address || address,
               count: current.count + 1,
               hasFlagged: current.hasFlagged || isFlaggedOrder,
               latestOrderAt: rowTime > currentLatestTime ? row.created_at : current.latestOrderAt,
@@ -455,6 +463,7 @@ export default function OrderFeed() {
           .map(([id, val]) => ({
             id,
             name: val.name,
+            address: val.address,
             count: val.count,
             hasFlagged: val.hasFlagged,
             latestOrderAt: val.latestOrderAt,
@@ -1068,6 +1077,9 @@ export default function OrderFeed() {
                       <span className="sidebar-customer-time font-mono-num">
                         {formatTime(cust.latestOrderAt)}
                       </span>
+                      <span className="sidebar-customer-address">
+                        {cust.address || "Address not on file"}
+                      </span>
                     </span>
                   </button>
                 );
@@ -1190,6 +1202,9 @@ export default function OrderFeed() {
                     </h1>
                     <p style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
                       Historical trends and order log
+                    </p>
+                    <p className="sidebar-customer-address" style={{ margin: "6px 0 0", maxWidth: 520 }}>
+                      Address: {customers.find((c) => c.id === selectedCustomerId)?.address || "Not on file"}
                     </p>
                   </div>
                 </div>
