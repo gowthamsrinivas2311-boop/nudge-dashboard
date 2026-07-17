@@ -64,7 +64,8 @@ async function sendWhatsAppMessage(to: string, body: string) {
     }
   );
 
-  const json = await response.json();
+  const responseText = await response.text();
+  const json = responseText ? JSON.parse(responseText) : {};
   if (!response.ok) {
     throw new Error(`Twilio error: ${json.message ?? JSON.stringify(json)}`);
   }
@@ -118,7 +119,8 @@ async function extractOrderData(message: string): Promise<OrderDraft & { hasOrde
       }),
     });
 
-    const json = await response.json();
+    const responseText = await response.text();
+    const json = responseText ? JSON.parse(responseText) : {};
     if (!response.ok) throw new Error(json.error?.message ?? JSON.stringify(json));
     const content = json.choices?.[0]?.message?.content?.trim() ?? "{}";
     const parsed = JSON.parse(content.replace(/^```json\s*/i, "").replace(/```$/i, ""));
@@ -406,7 +408,12 @@ Deno.serve(async (req: Request) => {
       headers: { ...corsHeaders, "Content-Type": "text/xml" },
     });
   } catch (err) {
-    console.error(`[whatsapp-webhook] Unhandled error: ${(err as Error).message}`);
+    const error = err as Error;
+    console.error(
+      `[whatsapp-webhook] Unhandled error processing ${req.method} ${new URL(req.url).pathname}: ${
+        error.stack ?? error.message
+      }`
+    );
     return twiml("Sorry, something went wrong while processing your message. Please try again.");
   }
 });
