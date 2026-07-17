@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "preview": {
+    "entry": "index.html"
+  },
+  "startup": {},
+  "skills": {
+    "preloaded": [
+      "merge-local",
+      "preview"
+    ]
+  }
+}
