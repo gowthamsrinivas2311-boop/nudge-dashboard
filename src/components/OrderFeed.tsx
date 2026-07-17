@@ -154,6 +154,17 @@ export default function OrderFeed() {
   const [globalStats, setGlobalStats] = useState({ totalProcessed: 0, totalFlagged: 0, uniqueCustomers: 0 });
   const [loadingGlobalStats, setLoadingGlobalStats] = useState(true);
 
+  // Delete order state
+  const [deleteTargetOrder, setDeleteTargetOrder] = useState<Order | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Modify Quantity state
+  const [modifyTargetOrder, setModifyTargetOrder] = useState<Order | null>(null);
+  const [modifyQty, setModifyQty] = useState("");
+  const [modifyReason, setModifyReason] = useState("");
+  const [modifyLoading, setModifyLoading] = useState(false);
+  const [modifyError, setModifyError] = useState<string | null>(null);
+
   // All orders for PatternStrip lookups (keyed by customer_id)
   const [allOrdersByCustomer, setAllOrdersByCustomer] = useState<Map<number, Order[]>>(new Map());
 
@@ -447,10 +458,121 @@ export default function OrderFeed() {
       } finally {
         setLoadingGlobalStats(false);
       }
-    }
-
     fetchGlobalData();
   }, [orders]);
+
+  // ── Delete an order ────────────────────────────────────────────────────
+  const handleDeleteOrder = useCallback(async (orderId: number) => {
+    setDeleteLoading(true);
+    const { error: deleteErr } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId);
+
+    if (deleteErr) {
+      console.error("[delete-order] Failed:", deleteErr);
+      alert(`Failed to delete order: ${deleteErr.message}`);
+      setDeleteLoading(false);
+      return;
+    }
+
+    console.log(`[delete-order] Deleted orderId=${orderId}`);
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    setCustomerHistory((prev) => prev.filter((o) => o.id !== orderId));
+    setDeleteTargetOrder(null);
+    setDeleteLoading(false);
+  }, []);
+
+  // ── Open Modify modal ───────────────────────────────────────────────────
+  const openModifyModal = useCallback((order: Order) => {
+    setModifyTargetOrder(order);
+    setModifyQty(String(order.quantity));
+    setModifyReason("");
+    setModifyError(null);
+  }, []);
+
+  // ── Save quantity change + trigger WhatsApp notification ────────────────
+  const handleModifyQuantity = useCallback(async () => {
+    if (!modifyTargetOrder) return;
+
+    const newQty = parseInt(modifyQty, 10);
+    if (!modifyQty || isNaN(newQty) || newQty < 1) {
+      setModifyError("Please enter a valid quantity (minimum 1).");
+      return;
+    }
+
+    const trimmedReason = modifyReason.trim();
+    if (trimmedReason.length > 0) {
+      const hasRealWord = /[a-zA-Z]{3,}/.test(trimmedReason);
+      if (trimmedReason.length < 8 || !hasRealWord) {
+        setModifyError("Please enter a meaningful reason, or leave it blank.");
+        return;
+      }
+    }
+
+    setModifyLoading(true);
+    setModifyError(null);
+
+    const orderId = modifyTargetOrder.id;
+    const prevQty = modifyTargetOrder.quantity;
+
+    // Optimistic update
+    const applyQtyUpdate = (prev: Order[]) =>
+      prev.map((o) => (o.id === orderId ? { ...o, quantity: newQty } : o));
+    setOrders(applyQtyUpdate);
+    setCustomerHistory(applyQtyUpdate);
+
+    // Persist to DB
+    const { error: updateErr } = await supabase
+      .from("orders")
+      .update({ quantity: newQty })
+      .eq("id", orderId);
+
+    if (updateErr) {
+      console.error("[modify-quantity] DB update failed:", updateErr);
+      const revert = (prev: Order[]) =>
+        prev.map((o) => (o.id === orderId ? { ...o, quantity: prevQty } : o));
+      setOrders(revert);
+      setCustomerHistory(revert);
+      setModifyError(`Failed to save: ${updateErr.message}`);
+      setModifyLoading(false);
+      return;
+    }
+
+    console.log(`[modify-quantity] Updated orderId=${orderId} quantity=${prevQty}->${newQty}`);
+
+    // Call edge function for AI rewrite + Twilio send
+    const customerName =
+      modifyTargetOrder.customers?.name ||
+      customers.find((c) => c.id === modifyTargetOrder.customer_id)?.name ||
+      "Customer";
+
+    try {
+      const { data: fnData, error: fnErr } = await supabase.functions.invoke(
+        "notify-quantity-change",
+        {
+          body: {
+            orderId,
+            newQty,
+            reason: trimmedReason,
+            item: modifyTargetOrder.item,
+            customerName,
+          },
+        }
+      );
+      if (fnErr) {
+        console.error("[notify-quantity-change] Edge function error:", fnErr);
+      } else {
+        console.log("[notify-quantity-change] Result:", fnData);
+      }
+    } catch (invokeErr) {
+      // Non-blocking: quantity already saved; just log
+      console.error("[notify-quantity-change] Invoke threw:", invokeErr);
+    }
+
+    setModifyTargetOrder(null);
+    setModifyLoading(false);
+  }, [modifyTargetOrder, modifyQty, modifyReason, customers]);
 
   // Update order status with optimistic UI updates
   const handleUpdateStatus = useCallback(async (orderId: number, newStatus: "approved" | "rejected") => {
@@ -1272,7 +1394,7 @@ export default function OrderFeed() {
 
                             {/* Raw message */}
                             {order.raw_message && (
-                              <div style={{ borderTop: "1px solid var(--rule)", paddingTop: 10 }}>
+                              <div style={{ borderTop: "1px solid var(--rule)", paddingTop: 10, marginBottom: 10 }}>
                                 <span className="label-caps" style={{ fontSize: 9, display: "block", marginBottom: 4 }}>
                                   Message
                                 </span>
@@ -1281,7 +1403,28 @@ export default function OrderFeed() {
                                 </p>
                               </div>
                             )}
+
+                            {/* Order actions: Modify Qty + Delete */}
+                            <div className="order-action-row">
+                              <button
+                                id={`modify-qty-detail-${order.id}`}
+                                className="order-action-btn order-action-btn--modify"
+                                onClick={() => openModifyModal(order)}
+                                title="Modify quantity"
+                              >
+                                ✎ Modify Qty
+                              </button>
+                              <button
+                                id={`delete-order-detail-${order.id}`}
+                                className="order-action-btn order-action-btn--delete"
+                                onClick={() => setDeleteTargetOrder(order)}
+                                title="Delete order"
+                              >
+                                × Delete
+                              </button>
+                            </div>
                           </div>
+
                         );
                       })}
                     </div>

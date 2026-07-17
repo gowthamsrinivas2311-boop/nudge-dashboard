@@ -610,3 +610,289 @@ body {
   pointer-events: none;
   z-index: 10;
 }
+
+/* ── Order action row (Delete + Modify Quantity buttons) ── */
+.order-action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+  margin-top: 4px;
+}
+
+.order-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  background: transparent;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  position: relative;
+}
+
+/* Modify Qty: teal variant */
+.order-action-btn--modify {
+  border: 1px solid rgba(78, 140, 124, 0.4);
+  color: rgba(78, 140, 124, 0.75);
+}
+
+.order-action-btn--modify:hover {
+  border-color: var(--ledger-teal);
+  color: var(--ledger-teal);
+  background: rgba(78, 140, 124, 0.06);
+}
+
+/* Delete: rust variant */
+.order-action-btn--delete {
+  border: 1px solid rgba(193, 85, 59, 0.35);
+  color: rgba(193, 85, 59, 0.65);
+}
+
+.order-action-btn--delete:hover {
+  border-color: var(--rust);
+  color: var(--rust);
+  background: rgba(193, 85, 59, 0.06);
+}
+
+/* ── Confirm Delete / Modify Quantity Modals ── */
+.action-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(12, 18, 15, 0.72);
+  backdrop-filter: blur(2px);
+  animation: modal-fade-in 0.15s ease;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.action-modal {
+  width: min(440px, calc(100vw - 48px));
+  background: var(--ledger-panel);
+  padding: 28px;
+  animation: modal-slide-up 0.18s ease;
+  position: relative;
+}
+
+@keyframes modal-slide-up {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.action-modal__close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-strong);
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s;
+}
+
+.action-modal__close:hover {
+  color: var(--parchment);
+}
+
+.action-modal__title {
+  margin: 0 28px 6px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--parchment);
+}
+
+.action-modal__subtitle {
+  margin: 0 0 20px;
+  font-size: 12px;
+  color: var(--muted-strong);
+  line-height: 1.5;
+}
+
+.action-modal__field {
+  margin-bottom: 16px;
+}
+
+.action-modal__label {
+  display: block;
+  font-family: 'Inter', sans-serif;
+  font-variant: all-small-caps;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.action-modal__input {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  color: var(--parchment);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  border-radius: 0;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.action-modal__input:focus {
+  border-color: var(--brass);
+}
+
+.action-modal__textarea {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--ink);
+  border: 1px solid var(--rule);
+  color: var(--parchment);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  outline: none;
+  border-radius: 0;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+}
+
+.action-modal__textarea:focus {
+  border-color: var(--brass);
+}
+
+.action-modal__textarea::placeholder,
+.action-modal__input::placeholder {
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.action-modal__hint {
+  margin: 5px 0 0;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.action-modal__error {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  background: rgba(193, 85, 59, 0.08);
+  border: 1px solid rgba(193, 85, 59, 0.3);
+  color: var(--rust);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.action-modal__ai-note {
+  margin: 0 0 18px;
+  padding: 9px 12px;
+  background: rgba(78, 140, 124, 0.06);
+  border: 1px solid rgba(78, 140, 124, 0.25);
+  color: rgba(78, 140, 124, 0.8);
+  font-size: 11px;
+  line-height: 1.5;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.action-modal__btn-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.action-modal__btn {
+  flex: 1;
+  padding: 10px 0;
+  border-radius: 0;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  transition: background-color 0.15s, opacity 0.15s;
+}
+
+.action-modal__btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.action-modal__btn--primary-teal {
+  background: transparent;
+  border: 1px solid var(--ledger-teal);
+  color: var(--ledger-teal);
+}
+
+.action-modal__btn--primary-teal:hover:not(:disabled) {
+  background: rgba(78, 140, 124, 0.1);
+}
+
+.action-modal__btn--primary-rust {
+  background: transparent;
+  border: 1px solid var(--rust);
+  color: var(--rust);
+}
+
+.action-modal__btn--primary-rust:hover:not(:disabled) {
+  background: rgba(193, 85, 59, 0.1);
+}
+
+.action-modal__btn--cancel {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--muted-strong);
+}
+
+.action-modal__btn--cancel:hover:not(:disabled) {
+  border-color: var(--muted-strong);
+  color: var(--parchment);
+}
+
+/* Loading spinner used inside modal Save button */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.inline-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  margin-right: 6px;
+  vertical-align: middle;
+}
