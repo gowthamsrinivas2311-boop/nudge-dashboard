@@ -24,7 +24,7 @@ type OrderDraft = {
 
 type ConversationState = {
   phone: string;
-  step: "ask_name" | "ask_order" | "ask_address" | "awaiting_partial_stock_decision";
+  step: "ask_name" | "ask_order" | "ask_address" | "awaiting_partial_stock_decision" | "updating_address";
   partial_data: OrderDraft;
 };
 
@@ -90,6 +90,55 @@ function normalizePhone(phone: string) {
 
 function isOrderIntent(message: string) {
   return /\b(order|place an order|buy|purchase|need|want)\b/i.test(message);
+}
+
+function looksLikeMultiItemOrder(message: string) {
+  const normalized = message.trim().toLowerCase();
+  const commaClauses = normalized
+    .split(",")
+    .map((clause) => clause.trim())
+    .filter(Boolean);
+
+  if (commaClauses.length > 1 && commaClauses.filter((clause) => /\b\d+\b/.test(clause)).length > 1) {
+    return true;
+  }
+
+  const quantityItemPairs = normalized.match(/\b\d+\s+[a-z][a-z\s-]*?(?=\s+\d+\s+[a-z]|,|$)/gi) ?? [];
+  return quantityItemPairs.length > 1;
+}
+
+function multiItemOrderMessage() {
+  return "For now, please order one item at a time - for example, 'I want 10 candles'. You can place your next item right after this one is confirmed.";
+}
+
+function isAddressLookupIntent(message: string) {
+  const normalized = message.trim().toLowerCase();
+  return (
+    /\b(what is|what's|show|tell me|confirm|check)\b.*\bmy\s+address\b/.test(normalized) ||
+    /\bmy\s+address\b/.test(normalized) && /\b(on file|saved|registered|stored|have)\b/.test(normalized)
+  );
+}
+
+function isNameLookupIntent(message: string) {
+  const normalized = message.trim().toLowerCase();
+  return /\b(what is|what's|show|tell me|confirm|check)\b.*\bmy\s+name\b/.test(normalized);
+}
+
+function isAddressUpdateIntent(message: string) {
+  const normalized = message.trim().toLowerCase();
+  return /\b(change|update|edit|replace|correct)\b.*\bmy\s+address\b/.test(normalized) || /\bi\s+moved\b/.test(normalized);
+}
+
+function addressOnFileMessage(customer: Customer | null) {
+  if (!customer) return "I don't have a customer profile for this WhatsApp number yet.";
+  if (!customer.address) return "I don't have an address on file for you yet.";
+  return `Your address on file is: ${customer.address}`;
+}
+
+function nameOnFileMessage(customer: Customer | null) {
+  if (!customer) return "I don't have a customer profile for this WhatsApp number yet.";
+  if (!customer.name) return "I don't have a name on file for you yet.";
+  return `Your name on file is: ${customer.name}`;
 }
 
 function looksLikeAddress(message: string) {
@@ -334,9 +383,10 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
 
     // Partial stock: stock > 0 but < requested — ask customer
     if (stockResult.found && !stockResult.deducted && (stockResult.available ?? 0) > 0) {
+      const matchedItem = stockResult.itemName ?? draft.item;
       const partialDraft: OrderDraft = {
         customerName: draft.customerName,
-        item: draft.item,
+        item: matchedItem,
         quantity: draft.quantity,
         address: draft.address,
         availableQuantity: stockResult.available,
@@ -344,8 +394,8 @@ async function processResolvedOrder(phone: string, draft: Required<OrderDraft>, 
         rawMessage: rawMessage,
       };
       await saveConversation(phone, "awaiting_partial_stock_decision", partialDraft);
-      await sendWhatsAppMessage(phone, partialStockMessage(draft.item, draft.quantity, stockResult.available!));
-      console.log(`[whatsapp-webhook] Partial stock for item=${draft.item} requested=${draft.quantity} available=${stockResult.available}`);
+      await sendWhatsAppMessage(phone, partialStockMessage(matchedItem, draft.quantity, stockResult.available!));
+      console.log(`[whatsapp-webhook] Partial stock for item=${matchedItem} requested=${draft.quantity} available=${stockResult.available}`);
       return;
     }
 
@@ -519,6 +569,31 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    if (existingState?.step === "updating_address") {
+      if (!looksLikeAddress(message)) {
+        await saveConversation(phone, "updating_address", draft);
+        return twiml("Please send your full new address, including enough detail for delivery.");
+      }
+
+      const addressCustomer = customer ?? (await getOrCreateCustomer(phone, draft.customerName ?? "Customer"));
+      await setCustomerAddress(addressCustomer.id, message);
+      await clearConversation(phone);
+      return twiml(`Thanks, your address has been updated to: ${message}`);
+    }
+
+    if (isAddressLookupIntent(message)) {
+      return twiml(addressOnFileMessage(customer));
+    }
+
+    if (isNameLookupIntent(message)) {
+      return twiml(nameOnFileMessage(customer));
+    }
+
+    if (isAddressUpdateIntent(message)) {
+      await saveConversation(phone, "updating_address", { customerName: customer?.name });
+      return twiml("Sure, please send your new full delivery address.");
+    }
+
     if (existingState?.step === "ask_name") {
       draft.customerName = cleanName(message);
     } else if (existingState?.step === "ask_address") {
@@ -528,6 +603,10 @@ Deno.serve(async (req: Request) => {
       }
       draft.address = message;
     } else {
+      if (looksLikeMultiItemOrder(message)) {
+        return twiml(multiItemOrderMessage());
+      }
+
       const extracted = await extractOrderData(message);
       draft = {
         ...draft,
