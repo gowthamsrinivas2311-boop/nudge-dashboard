@@ -47,14 +47,23 @@ const dashboardViews: DashboardView[] = ["feed", "insights", "tracking", "invent
 const lowStockThreshold = 10;
 const customerStatusMeta = {
   reviewHistory: {
-    label: "Review history",
+    label: "Needs review",
     color: "var(--rust)",
   },
   clear: {
-    label: "Clear",
+    label: "No issues",
     color: "var(--ledger-teal)",
   },
 } as const;
+
+const isReviewOrder = (order: Pick<Order, "flagged" | "status">) =>
+  order.flagged === true ||
+  order.status === "flagged" ||
+  order.status === "approved" ||
+  order.status === "rejected";
+
+const isAnomalyOrder = (order: Pick<Order, "flagged" | "status">) =>
+  order.flagged === true || order.status === "flagged" || order.status === "rejected";
 
 const isConfirmedOrApprovedStatus = (status: string | null | undefined) =>
   Boolean(status?.startsWith("confirmed") || status === "approved");
@@ -551,11 +560,7 @@ export default function OrderFeed() {
           if (row.customer_id) {
             const name = row.customers?.name || "Unknown Customer";
             const address = row.customers?.address || null;
-            const isFlaggedOrder =
-              row.flagged === true ||
-              row.status === "flagged" ||
-              row.status === "approved" ||
-              row.status === "rejected";
+            const isFlaggedOrder = isReviewOrder(row);
             const current = customerMap.get(row.customer_id) || {
               name,
               address,
@@ -1001,11 +1006,7 @@ export default function OrderFeed() {
 
       custOrders.forEach((order) => {
         const orderTime = new Date(order.created_at).getTime();
-        const isFlaggedOrder =
-          order.flagged === true ||
-          order.status === "flagged" ||
-          order.status === "approved" ||
-          order.status === "rejected";
+        const isFlaggedOrder = isReviewOrder(order);
 
         if (!isFlaggedOrder || orderTime < weekStart.getTime()) return;
 
@@ -1159,6 +1160,9 @@ export default function OrderFeed() {
                 </span>
               ))}
             </div>
+            {customers.length > 0 && !customers.some((customer) => customer.hasFlagged) && (
+              <div className="sidebar-empty-review-note">No clients need review</div>
+            )}
           </div>
 
           {/* Customer list */}
@@ -1482,14 +1486,16 @@ export default function OrderFeed() {
                     </h3>
 
                     {Object.keys(historyByItem).length === 0 ? (
-                      <div className="viewfinder-card" style={{ textAlign: "center", padding: 32 }}>
-                        <p style={{ color: "var(--muted)", fontSize: 13 }}>No items found</p>
+                      <div className="viewfinder-card empty-state-card">
+                        <h4 className="font-display">No order history yet</h4>
+                        <p>Once this client places orders, baseline trends will appear here.</p>
                       </div>
                     ) : (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 20 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(380px, 1fr))", gap: 20, alignItems: "start" }}>
                         {Object.keys(historyByItem).map((item) => {
                           const itemHistory = historyByItem[item];
                           const hasBaselineChart = itemHistory.length >= 3;
+                          const maxQuantity = Math.max(...itemHistory.map((order) => Number(order.quantity)), 1);
 
                           return (
                           <div key={item} className="viewfinder-card">
@@ -1503,10 +1509,18 @@ export default function OrderFeed() {
                                 </p>
                               </div>
                               <div style={{ textAlign: "right" }}>
-                                <span className="label-caps" style={{ fontSize: 9 }}>Ref. Avg</span>
+                                <span className="label-caps" style={{ fontSize: 9 }}>
+                                  {hasBaselineChart ? "Ref. Avg" : "Provisional Avg"}
+                                </span>
                                 <span
                                   className="font-mono-num"
-                                  style={{ display: "block", fontSize: 13, fontWeight: 600, color: "var(--brass)", marginTop: 2 }}
+                                  style={{
+                                    display: "block",
+                                    fontSize: hasBaselineChart ? 13 : 11,
+                                    fontWeight: 600,
+                                    color: hasBaselineChart ? "var(--brass)" : "var(--muted-strong)",
+                                    marginTop: 2,
+                                  }}
                                 >
                                   {referenceAverages[item]}
                                 </span>
@@ -1515,6 +1529,19 @@ export default function OrderFeed() {
 
                             {!hasBaselineChart ? (
                               <div className="baseline-pending-callout">
+                                <div className="baseline-mini-axis" aria-hidden="true">
+                                  <span className="baseline-mini-axis__line" />
+                                  {itemHistory.map((order, index) => (
+                                    <span
+                                      key={order.id}
+                                      className={`baseline-mini-axis__dot ${isAnomalyOrder(order) ? "baseline-mini-axis__dot--anomaly" : ""}`}
+                                      style={{
+                                        left: `${itemHistory.length === 1 ? 50 : (index / (itemHistory.length - 1)) * 100}%`,
+                                        bottom: `${Math.max(8, (Number(order.quantity) / maxQuantity) * 72)}%`,
+                                      }}
+                                    />
+                                  ))}
+                                </div>
                                 <span className="label-caps" style={{ fontSize: 9 }}>
                                   Establishing baseline
                                 </span>
@@ -1523,7 +1550,12 @@ export default function OrderFeed() {
                                 </p>
                                 <div className="baseline-pending-callout__quantities">
                                   {itemHistory.map((order) => (
-                                    <span key={order.id} className="baseline-pending-callout__quantity">
+                                    <span
+                                      key={order.id}
+                                      className={`baseline-pending-callout__quantity ${
+                                        isAnomalyOrder(order) ? "baseline-pending-callout__quantity--anomaly" : ""
+                                      }`}
+                                    >
                                       #{order.sequence}: {order.quantity}
                                     </span>
                                   ))}
@@ -1830,7 +1862,7 @@ export default function OrderFeed() {
                 </div>
                 {/* Segment 2 */}
                 <div style={{ flex: 1, padding: "14px 20px", borderRight: "1px solid var(--rule)" }}>
-                  <span className="label-caps">Flagged</span>
+                  <span className="label-caps">Needs Review</span>
                   <p className="font-mono-num" style={{ fontSize: 24, fontWeight: 600, margin: "4px 0 0", color: "var(--rust)" }}>
                     {loadingGlobalStats ? "—" : globalStats.totalFlagged}
                   </p>
@@ -2025,7 +2057,7 @@ export default function OrderFeed() {
                         transition: "all 0.15s",
                       }}
                     >
-                      {f === "all" ? "All Orders" : f === "confirmed" ? "Confirmed" : "Flagged"}
+                      {f === "all" ? "All Orders" : f === "confirmed" ? "Confirmed" : "Needs Review"}
                     </button>
                   ))}
                 </div>
