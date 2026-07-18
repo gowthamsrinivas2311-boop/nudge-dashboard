@@ -42,7 +42,9 @@ type StockDeductionResult = {
 
 type InventoryPreview = {
   item_name: string;
+  category: string | null;
   current_stock: number | string | null;
+  price_per_unit: number | string | null;
 };
 
 const supabaseAdmin = createClient(
@@ -325,7 +327,7 @@ function normalizeInventoryLookup(value: string) {
 async function previewInventoryMatch(item: string): Promise<InventoryPreview | null> {
   const { data, error } = await supabaseAdmin
     .from("inventory")
-    .select("item_name, current_stock")
+    .select("item_name, category, current_stock, price_per_unit")
     .order("item_name", { ascending: true });
   if (error) throw error;
 
@@ -388,6 +390,39 @@ function stockNotFoundMessage(item: string) {
   return `Sorry, I couldn't verify stock for ${item} right now, so I can't place this order yet.`;
 }
 
+function deliveryDaysForCategory(category: string | null | undefined) {
+  switch ((category ?? "").trim().toLowerCase()) {
+    case "groceries":
+    case "toiletries":
+      return 2;
+    case "electronics":
+      return 5;
+    case "stationery":
+      return 0;
+    default:
+      return 3;
+  }
+}
+
+function estimateDeliveryDateForCategory(category: string | null | undefined, from = new Date()) {
+  const istDate = new Date(from.getTime() + 5.5 * 60 * 60 * 1000);
+  istDate.setUTCDate(istDate.getUTCDate() + deliveryDaysForCategory(category));
+  return istDate.toISOString().slice(0, 10);
+}
+
+function formatMoney(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function orderConfirmationMessage(quantity: number, item: string, pricePerUnit: number | null, estimatedDeliveryDate: string) {
+  if (pricePerUnit === null || !Number.isFinite(pricePerUnit)) {
+    return `Order confirmed: ${quantity} ${item}. Estimated delivery: ${formatDate(estimatedDeliveryDate)}.`;
+  }
+
+  const total = pricePerUnit * quantity;
+  return `Order confirmed: ${quantity} ${item} — ₹${formatMoney(pricePerUnit)} x ${quantity} = ₹${formatMoney(total)}. Estimated delivery: ${formatDate(estimatedDeliveryDate)}.`;
+}
+
 async function checkStockAndDeductForConfirmation(phone: string, draft: ResolvedOrderDraft) {
   const stockResult = await checkAndDeductStock(draft.item, draft.quantity);
 
@@ -431,7 +466,6 @@ async function processResolvedOrder(phone: string, draft: ResolvedOrderDraft, ra
   const flagReason = isFlagged
     ? `Unusual quantity for ${draft.item}: ${draft.quantity} vs average ${average!.toFixed(1)}`
     : null;
-  const estimatedDeliveryDate = estimateDeliveryDate(draft.item);
 
   if (!isFlagged) {
     const stockDecision = await checkStockAndDeductForConfirmation(phone, draft);
@@ -441,6 +475,12 @@ async function processResolvedOrder(phone: string, draft: ResolvedOrderDraft, ra
     draft.item = stockDecision.itemName;
   }
 
+  const inventoryItem = await previewInventoryMatch(draft.item);
+  const estimatedDeliveryDate = estimateDeliveryDateForCategory(inventoryItem?.category);
+  const pricePerUnit =
+    inventoryItem?.price_per_unit === null || inventoryItem?.price_per_unit === undefined
+      ? null
+      : Number(inventoryItem.price_per_unit);
   const status = isFlagged ? "flagged" : "confirmed";
   const { data: order, error: orderErr } = await supabaseAdmin
     .from("orders")
@@ -466,19 +506,11 @@ async function processResolvedOrder(phone: string, draft: ResolvedOrderDraft, ra
   } else {
     await sendWhatsAppMessage(
       phone,
-      `Order confirmed: ${draft.quantity} ${draft.item}. Estimated delivery: ${formatDate(estimatedDeliveryDate)}.`
+      orderConfirmationMessage(draft.quantity, draft.item, pricePerUnit, estimatedDeliveryDate)
     );
   }
 
   console.log(`[whatsapp-webhook] Processed orderId=${order.id} flagged=${isFlagged}`);
-}
-
-function estimateDeliveryDate(item: string) {
-  const days = /electronics/i.test(item) ? 5 : /stationery|office/i.test(item) ? 3 : 2;
-  const now = new Date();
-  const istDate = new Date(now.getTime() + 5.5 * 60 * 60 * 1000);
-  istDate.setUTCDate(istDate.getUTCDate() + days);
-  return istDate.toISOString().slice(0, 10);
 }
 
 function formatDate(dateString: string) {
@@ -510,6 +542,7 @@ async function handleStatusCommand(phone: string, message: string) {
   if (command === "APPROVE") {
     const stockResult = await checkAndDeductStock(String(order.item), Number(order.quantity));
     const matchedItem = stockResult.itemName ?? String(order.item);
+    let approvedConfirmationMessage = `Order confirmed: ${order.quantity} ${matchedItem}.`;
 
     if (!stockResult.found) {
       return stockNotFoundMessage(String(order.item));
@@ -524,16 +557,40 @@ async function handleStatusCommand(phone: string, message: string) {
       return stockLimitMessage(matchedItem, Number(order.quantity), stockResult.available ?? 0);
     }
 
+    const inventoryItem = await previewInventoryMatch(matchedItem);
+    const estimatedDeliveryDate = estimateDeliveryDateForCategory(inventoryItem?.category);
+    const pricePerUnit =
+      inventoryItem?.price_per_unit === null || inventoryItem?.price_per_unit === undefined
+        ? null
+        : Number(inventoryItem.price_per_unit);
+    approvedConfirmationMessage = orderConfirmationMessage(
+      Number(order.quantity),
+      matchedItem,
+      pricePerUnit,
+      estimatedDeliveryDate
+    );
     console.log(`[whatsapp-webhook] Stock deducted item=${matchedItem} quantity=${Number(order.quantity)} for approved orderId=${order.id}`);
+
+    const { error: approvedUpdateErr } = await supabaseAdmin
+      .from("orders")
+      .update({
+        item: matchedItem,
+        estimated_delivery_date: estimatedDeliveryDate,
+      })
+      .eq("id", order.id);
+    if (approvedUpdateErr) throw approvedUpdateErr;
+
+    const nextStatus = "approved";
+    const { error: updateErr } = await supabaseAdmin.from("orders").update({ status: nextStatus }).eq("id", order.id);
+    if (updateErr) throw updateErr;
+    return approvedConfirmationMessage;
   }
 
-  const nextStatus = command === "APPROVE" ? "approved" : "rejected";
+  const nextStatus = "rejected";
   const { error: updateErr } = await supabaseAdmin.from("orders").update({ status: nextStatus }).eq("id", order.id);
   if (updateErr) throw updateErr;
 
-  return command === "APPROVE"
-    ? `Order approved: ${order.quantity} ${order.item}.`
-    : `Order rejected: ${order.quantity} ${order.item}.`;
+  return `Order rejected: ${order.quantity} ${order.item}.`;
 }
 
 Deno.serve(async (req: Request) => {
