@@ -254,7 +254,7 @@ export default function OrderFeed() {
 
   const whatsAppOrderUrl =
     "https://wa.me/+14155238886?text=Hi%2C%20I%20want%20to%20place%20an%20order";
-  const whatsappJoinCode = "join middle-past";
+  const whatsappJoinCode = "join cloud-engine";
   const placeOrderButtonRef = useRef<HTMLButtonElement | null>(null);
   const orderModalRef = useRef<HTMLDivElement | null>(null);
 

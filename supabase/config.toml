@@ -1,0 +1,5 @@
+[functions.whatsapp-webhook]
+verify_jwt = false
+
+[functions.notify-quantity-change]
+verify_jwt = false
