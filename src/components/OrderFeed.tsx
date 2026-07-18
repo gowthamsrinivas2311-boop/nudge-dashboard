@@ -252,9 +252,12 @@ export default function OrderFeed() {
     selectedCustomerIdRef.current = selectedCustomerId;
   }, [selectedCustomerId]);
 
-  const whatsAppOrderUrl =
-    "https://wa.me/+14155238886?text=Hi%2C%20I%20want%20to%20place%20an%20order";
+  const whatsappNumber = "14155238886";
   const whatsappJoinCode = "join cloud-engine";
+  const whatsAppJoinUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(whatsappJoinCode)}`;
+  const whatsAppOrderUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
+    "Hi, I want to place an order"
+  )}`;
   const placeOrderButtonRef = useRef<HTMLButtonElement | null>(null);
   const orderModalRef = useRef<HTMLDivElement | null>(null);
 
@@ -263,8 +266,8 @@ export default function OrderFeed() {
       localStorage.setItem("nudge-whatsapp-opened", "true");
       setHasOpenedWhatsApp(true);
     }
-    window.open(whatsAppOrderUrl, "_blank");
-  }, []);
+    window.open(rememberJoinClick ? whatsAppJoinUrl : whatsAppOrderUrl, "_blank");
+  }, [whatsAppJoinUrl, whatsAppOrderUrl]);
 
   const closeOrderModal = useCallback(() => {
     setIsOrderModalOpen(false);
@@ -2453,7 +2456,7 @@ export default function OrderFeed() {
             {!hasOpenedWhatsApp ? (
               <>
                 <button type="button" className="order-modal__primary" onClick={() => handleOpenWhatsApp(true)}>
-                  Open WhatsApp
+                  Join sandbox on WhatsApp
                 </button>
                 <button type="button" className="order-modal__link" onClick={() => handleOpenWhatsApp(false)}>
                   Already joined? Place an order instead
